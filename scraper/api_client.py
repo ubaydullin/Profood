@@ -6,10 +6,10 @@ class AsyncAPIClient:
     def __init__(self, base_url: str, custom_headers: Dict[str, str] = None):
         self.base_url = base_url
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
-            "Connection": "keep-alive"
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "ru",
+            "connection": "keep-alive"
         }
         if custom_headers:
             self.headers.update(custom_headers)
@@ -35,6 +35,7 @@ class AsyncAPIClient:
                     delay *= 2
                 else:
                     print(f"[API_CLIENT] HTTP Error {response.status_code} for {endpoint}")
+                    print(f"[API_CLIENT] Error Body: {response.text}")
                     return {}
                     
             except httpx.RequestError as e:

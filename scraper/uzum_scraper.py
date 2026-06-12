@@ -36,7 +36,7 @@ class UzumScraper:
         
         # Example vendor id from user's cURL
         vendor_id = "bad11656-434c-4549-88c7-1b6d11da5dc1"
-        data = await self.client.get(f"/vendors/{vendor_id}/catalog", params={"lat": 41.353617, "long": 69.345498}) 
+        data = await self.client.get(f"/vendors/{vendor_id}/catalog", params={"lat": "41.353617065548406", "long": "69.34549857311852"})
         
         if not data:
             print("[Uzum] API returned empty. Needs valid cookie/tokens.")
