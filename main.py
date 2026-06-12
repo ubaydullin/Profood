@@ -14,8 +14,13 @@ async def run_scraper_async():
     print("Initializing scrapers and database...")
     await init_db()
     try:
-        await scrape_uzum()
-        await scrape_yandex()
+        uzum_stats = await scrape_uzum()
+        from notifications.bot import send_parsing_stats
+        await send_parsing_stats("UZUM", "completed", *uzum_stats)
+        
+        yandex_stats = await scrape_yandex()
+        await send_parsing_stats("YANDEX", "completed", *yandex_stats)
+        
         print("All scraping tasks completed successfully.")
         
         # Export to JSON
@@ -95,9 +100,21 @@ async def run_scraper_async():
         now = datetime.utcnow()
         recent_threshold = now - timedelta(minutes=15)
         
-        for promo in top_promos:
-            if promo['discount_percent'] >= 20 and promo['first_seen_at'] >= recent_threshold:
-                await send_telegram_alert(f"🚨 <b>Агрессивная скидка!</b>\n{promo['restaurant_name']} снизил цену на {promo['promo_title']} на {promo['discount_percent']}%!")
+        urgent_promos = [p for p in top_promos if p['discount_percent'] >= 20 and p['first_seen_at'] >= recent_threshold]
+        if urgent_promos:
+            msg = "🚨 <b>Внимание! Активность конкурентов!</b> 🚨\n\n"
+            for p in urgent_promos[:5]:
+                msg += f"🔥 <b>{p['restaurant_name']}</b>\n"
+                msg += f"Акция: Скидка: {p['promo_title']}\n"
+                msg += f"Скидка: {p['discount_percent']}%\n\n"
+                
+            remaining = len(urgent_promos) - 5
+            if remaining > 0:
+                msg += f"...и еще {remaining} агрессивных акций. Проверьте дашборд."
+            else:
+                msg += "Проверьте дашборд."
+                
+            await send_telegram_alert(msg)
         
         # 2. Daily Digest (Top 5)
         # We only send the digest if specifically requested or if it's a specific time.
@@ -106,7 +123,8 @@ async def run_scraper_async():
         for p in top_promos:
             print(f"{p['restaurant_name']} - {p['promo_title']} ({p['discount_percent']}%)")
             
-        # await send_daily_digest(top_promos) # Moved to a scheduled task to prevent spam
+        # Uncomment to send via bot if needed
+        # await send_daily_digest(top_promos)
         
     except Exception as e:
         print(f"Error during scraping: {e}")

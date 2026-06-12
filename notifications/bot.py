@@ -45,6 +45,21 @@ async def send_telegram_alert(message: str):
     except Exception as e:
         print(f"Failed to send Telegram alert: {e}")
 
+async def send_parsing_stats(platform: str, status: str, rest_count: int, promo_count: int, error_count: int):
+    icon = "✅" if status == "completed" else "❌"
+    from datetime import datetime
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    msg = f"{icon} <b>Парсинг завершен: {platform}</b>\n"
+    msg += f"Статус: {status}\n\n"
+    msg += "📊 <b>Результаты:</b>\n"
+    msg += f"🍽 Найдено заведений: {rest_count}\n"
+    msg += f"🏷 Найдено акций: {promo_count}\n"
+    msg += f"⚠️ Ошибок: {error_count}\n\n"
+    msg += f"🕒 Время (Ташкент): {now_str}"
+    
+    await send_telegram_alert(msg)
+
 async def send_daily_digest(top_promos: list):
     """
     Sends the daily top 5 discounts.
@@ -52,11 +67,14 @@ async def send_daily_digest(top_promos: list):
     if not top_promos:
         return
         
-    msg = "📊 <b>Ежедневный Дайджест: ТОП-5 Скидок</b>\n\n"
+    msg = "🌟 <b>ТОП-5 самых выгодных акций в Ташкенте:</b>\n\n"
     for idx, p in enumerate(top_promos[:5], 1):
-        msg += f"{idx}. <b>{p['restaurant_name']}</b> - {p['promo_title']}\n"
-        msg += f"   Скидка: {p['discount_percent']}% (Старая цена: {p['original_price']}, Новая: {p['current_price']})\n\n"
+        msg += f"{idx}. 🟣 <b>{p['restaurant_name']}</b>\n"
+        msg += f"   🔥 Скидка: {p['discount_percent']}%\n"
+        msg += f"   📝 Скидка: {p['promo_title']}\n"
+        msg += f"   💰 Старая цена: {p['original_price']} сум, Новая цена: {p['current_price']} сум\n"
         
+    msg += "\n📱 Откройте дашборд для подробного анализа!"
     await send_telegram_alert(msg)
 
 async def start_bot_polling():

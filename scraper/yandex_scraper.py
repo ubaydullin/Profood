@@ -84,6 +84,8 @@ def sync_scrape_yandex():
     return results
 
 async def process_yandex_results(results):
+    promos_count = 0
+    errors_count = 0
     async with AsyncSessionLocal() as db:
         for data in results:
             raw_name = data["name"]
@@ -132,6 +134,7 @@ async def process_yandex_results(results):
                 db.add(snapshot)
                 
                 if old_price > price > 0:
+                    promos_count += 1
                     discount = round(((old_price - price) / old_price) * 100, 1)
                     promo_stmt = select(Promotion).where(Promotion.restaurant_id == restaurant.id, Promotion.title == item["name"])
                     promo_result = await db.execute(promo_stmt)
@@ -160,8 +163,14 @@ async def process_yandex_results(results):
                         promo.is_active = True
                         
         await db.commit()
+    return len(results), promos_count, errors_count
 
 async def scrape_yandex():
-    results = await asyncio.to_thread(sync_scrape_yandex)
-    await process_yandex_results(results)
-    print("[Yandex] Completed scrape.")
+    try:
+        results = await asyncio.to_thread(sync_scrape_yandex)
+        stats = await process_yandex_results(results)
+        print("[Yandex] Completed scrape.")
+        return stats
+    except Exception as e:
+        print(f"[Yandex] Scrape failed: {e}")
+        return 0, 0, 1
