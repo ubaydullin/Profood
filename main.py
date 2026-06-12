@@ -4,13 +4,15 @@ import asyncio
 from scraper.uzum_scraper import UzumScraper
 from scraper.yandex_scraper import YandexScraper
 from notifications.bot import send_telegram_alert, send_daily_digest, start_bot_polling, close_bot_session
+from database.db import init_db
 
 def run_dashboard():
     print("Starting Promotion Intelligence Dashboard...")
     subprocess.run(["uv", "run", "streamlit", "run", "app.py"])
 
 async def run_scraper_async():
-    print("Initializing scrapers...")
+    print("Initializing scrapers and database...")
+    await init_db()
     uzum = UzumScraper()
     yandex = YandexScraper()
     
