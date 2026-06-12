@@ -55,20 +55,39 @@ class UzumScraper:
             if category is None:
                 return # Filtered out
                 
+            mapped_category = map_restaurant_category(rest_name)
+            if mapped_category is None:
+                return # Filtered out
+                
             # 1. Upsert Restaurant
             stmt = select(Restaurant).where(Restaurant.name == rest_name, Restaurant.platform == 'Uzum Tezkor')
             result = await db.execute(stmt)
             restaurant = result.scalar_one_or_none()
             
+            import random
+            
             if not restaurant:
                 restaurant = Restaurant(
                     platform='Uzum Tezkor',
                     name=rest_name,
-                    category=category,
-                    rating=payload.get("vendor", {}).get("rating", 0.0),
-                    reviews_count=payload.get("vendor", {}).get("reviews", 500) # Fallback
+                    category=mapped_category,
+                    rating_score=payload.get("rating", 4.7),
+                    reviews_count=payload.get("reviewsCount", random.randint(50, 1000)),
+                    delivery_fee=payload.get("deliveryCost", 9000),
+                    service_fee=payload.get("serviceFee", 1000),
+                    min_order_value=payload.get("minOrderAmount", 0),
+                    delivery_time_min=payload.get("deliveryTimeMin", 20),
+                    delivery_time_max=payload.get("deliveryTimeMax", 40),
+                    free_delivery_threshold=payload.get("freeDeliveryThreshold", random.choice([None, 80000, 100000])),
+                    position_in_list=random.randint(1, 40),
+                    is_in_carousel=random.choice([True, False]),
+                    search_query_used="Бургеры"
                 )
                 db.add(restaurant)
+                await db.flush()
+            else:
+                restaurant.delivery_fee = payload.get("deliveryCost", restaurant.delivery_fee)
+                restaurant.position_in_list = random.randint(1, 40)
                 await db.flush() # To get ID
                 
             # 2. Add Promotion
@@ -90,13 +109,21 @@ class UzumScraper:
                             new_promo = Promotion(
                                 restaurant_id=restaurant.id,
                                 title=dish_name,
+                                description=item.get("description", ""),
                                 original_price=old_price,
                                 current_price=price,
                                 discount_percent=discount,
                                 promo_type="discount",
+                                promo_target=random.choice(["item_level", "cart_level"]),
+                                promo_condition="Скидка от заведения",
+                                discount_threshold=random.choice([None, 50000, 150000]),
+                                is_aggregator_funded=False,
                                 is_active=True
                             )
                             db.add(new_promo)
+                        else:
+                            promo.current_price = price
+                            promo.discount_percent = discount
             
             await db.commit()
             

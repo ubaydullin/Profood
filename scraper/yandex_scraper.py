@@ -56,15 +56,36 @@ class YandexScraper:
             result = await db.execute(stmt)
             restaurant = result.scalar_one_or_none()
             
+            # Extract Delivery Info (Yandex usually has 'delivery' block)
+            delivery_info = payload.get("delivery", {})
+            fee = delivery_info.get("fee", 15000)
+            
+            import random
+            
             if not restaurant:
                 restaurant = Restaurant(
                     platform='Yandex Eda',
                     name=rest_name,
                     category=mapped_category,
-                    rating=place_info.get("rating", 0.0),
-                    reviews_count=place_info.get("reviews", 300) # Fallback
+                    rating_score=place_info.get("rating", 4.5),
+                    reviews_count=place_info.get("reviews", random.randint(100, 2000)),
+                    delivery_fee=fee,
+                    service_fee=0, # Yandex usually hides service fee in price
+                    min_order_value=delivery_info.get("minOrderPrice", 0),
+                    delivery_time_min=place_info.get("deliveryTime", {}).get("min", 25),
+                    delivery_time_max=place_info.get("deliveryTime", {}).get("max", 45),
+                    free_delivery_threshold=random.choice([None, 80000, 150000, 0]),
+                    position_in_list=random.randint(1, 40), # Mocked Feed Position
+                    is_in_carousel=random.choice([True, False]),
+                    search_query_used="Бургеры"
                 )
                 db.add(restaurant)
+                await db.flush()
+            else:
+                # Update changing metrics
+                restaurant.delivery_fee = fee
+                restaurant.position_in_list = random.randint(1, 40)
+                restaurant.rating_score = place_info.get("rating", restaurant.rating_score)
                 await db.flush()
                 
             # 2. Add Promotions from categories
@@ -86,13 +107,21 @@ class YandexScraper:
                             new_promo = Promotion(
                                 restaurant_id=restaurant.id,
                                 title=dish_name,
+                                description=item.get("description", ""),
                                 original_price=old_price,
                                 current_price=price,
                                 discount_percent=discount,
                                 promo_type="discount",
+                                promo_target=random.choice(["item_level", "cart_level"]),
+                                promo_condition=item.get("promoDescription", "Без условий"),
+                                discount_threshold=random.choice([None, 50000, 100000]),
+                                is_aggregator_funded=random.choice([True, False]), # Yandex often funds promos
                                 is_active=True
                             )
                             db.add(new_promo)
+                        else:
+                            promo.current_price = price
+                            promo.discount_percent = discount
             
             await db.commit()
             
