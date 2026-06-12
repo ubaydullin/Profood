@@ -87,16 +87,26 @@ async def run_scraper_async():
                     'promo_title': promo.title,
                     'discount_percent': promo.discount_percent,
                     'original_price': promo.original_price,
-                    'current_price': promo.current_price
+                    'current_price': promo.current_price,
+                    'first_seen_at': promo.first_seen_at
                 })
         
-        # 1. Alert for aggressive discounts > 20%
+        # 1. Alert for aggressive discounts > 20% (ONLY IF NEW)
+        now = datetime.utcnow()
+        recent_threshold = now - timedelta(minutes=15)
+        
         for promo in top_promos:
-            if promo['discount_percent'] >= 20:
+            if promo['discount_percent'] >= 20 and promo['first_seen_at'] >= recent_threshold:
                 await send_telegram_alert(f"🚨 <b>Агрессивная скидка!</b>\n{promo['restaurant_name']} снизил цену на {promo['promo_title']} на {promo['discount_percent']}%!")
         
         # 2. Daily Digest (Top 5)
-        await send_daily_digest(top_promos)
+        # We only send the digest if specifically requested or if it's a specific time.
+        # For now, we will print it to console to avoid spamming the user on every scrape.
+        print("Top 5 Promos:")
+        for p in top_promos:
+            print(f"{p['restaurant_name']} - {p['promo_title']} ({p['discount_percent']}%)")
+            
+        # await send_daily_digest(top_promos) # Moved to a scheduled task to prevent spam
         
     except Exception as e:
         print(f"Error during scraping: {e}")
