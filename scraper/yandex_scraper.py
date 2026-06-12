@@ -7,24 +7,22 @@ from sqlalchemy.future import select
 
 class YandexScraper:
     def __init__(self):
-        # We use eats.yandex.com based on the user's cURL
-        self.client = AsyncAPIClient(base_url="https://eats.yandex.com/api/v2")
+        import os
+        yandex_cookie = os.getenv("YANDEX_COOKIE", "")
         
-        # Inject custom Yandex headers from cURL
-        self.client.headers.update({
+        custom_headers = {
             'accept-language': 'ru',
             'user-agent': 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36',
             'x-app-version': '18.27.5',
             'x-platform': 'mobile_web',
             'x-client-session': 'mqamdrx9-wfjxovhoogi-a8c7vn0s6lu-a8wct5uunre',
             'x-device-id': 'mpqmt1u5-cx1eow44764-qeed6t0gz3-anc22db3mfh'
-        })
-        
-        # You should put your cookie in the .env as YANDEX_COOKIE in production
-        import os
-        yandex_cookie = os.getenv("YANDEX_COOKIE")
+        }
         if yandex_cookie:
-            self.client.headers['cookie'] = yandex_cookie
+            custom_headers['cookie'] = yandex_cookie
+            
+        # We use eats.yandex.com based on the user's cURL
+        self.client = AsyncAPIClient(base_url="https://eats.yandex.com/api/v2", custom_headers=custom_headers)
 
     async def scrape_promotions(self):
         print("[Yandex] Starting scrape...")

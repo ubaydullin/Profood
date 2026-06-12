@@ -7,9 +7,11 @@ from sqlalchemy.future import select
 
 class UzumScraper:
     def __init__(self):
-        self.client = AsyncAPIClient(base_url="https://www.uzumtezkor.uz/api/v2")
+        import os
+        uzum_cookie = os.getenv("UZUM_COOKIE", "")
+        uzum_auth = os.getenv("UZUM_AUTH_TOKEN", "")
         
-        self.client.headers.update({
+        custom_headers = {
             'accept': '*/*',
             'accept-language': 'ru',
             'user-agent': 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36',
@@ -20,15 +22,14 @@ class UzumScraper:
             'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-origin'
-        })
+        }
         
-        import os
-        uzum_cookie = os.getenv("UZUM_COOKIE")
-        uzum_auth = os.getenv("UZUM_AUTH_TOKEN")
         if uzum_cookie:
-            self.client.headers['cookie'] = uzum_cookie
+            custom_headers['cookie'] = uzum_cookie
         if uzum_auth:
-            self.client.headers['authorization'] = uzum_auth
+            custom_headers['authorization'] = uzum_auth
+            
+        self.client = AsyncAPIClient(base_url="https://www.uzumtezkor.uz/api/v2", custom_headers=custom_headers)
 
     async def scrape_promotions(self):
         print("[Uzum] Starting scrape...")
