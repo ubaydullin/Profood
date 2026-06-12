@@ -3,7 +3,6 @@ import argparse
 import asyncio
 from scraper.uzum_scraper import UzumScraper
 from scraper.yandex_scraper import YandexScraper
-from scraper.express24_scraper import Express24Scraper
 from notifications.bot import send_telegram_alert, send_daily_digest, start_bot_polling, close_bot_session
 
 def run_dashboard():
@@ -14,13 +13,11 @@ async def run_scraper_async():
     print("Initializing scrapers...")
     uzum = UzumScraper()
     yandex = YandexScraper()
-    express = Express24Scraper()
     
     try:
         await asyncio.gather(
             uzum.scrape_promotions(),
-            yandex.scrape_promotions(),
-            express.scrape_promotions()
+            yandex.scrape_promotions()
         )
         print("All scraping tasks completed successfully.")
         
@@ -43,7 +40,6 @@ async def run_scraper_async():
     finally:
         await uzum.close()
         await yandex.close()
-        await express.close()
         await close_bot_session()
 
 def run_scraper():

@@ -54,11 +54,9 @@ def get_mock_data():
     data = [
         {'platform': 'Uzum Tezkor', 'restaurant_name': 'Evos', 'promo_title': 'Lavash Meat', 'current_price': 30000, 'original_price': 35000, 'restaurant_reviews': 5000, 'discount_percent': 14.3},
         {'platform': 'Yandex Eda', 'restaurant_name': 'Oqtepa Lavash', 'promo_title': 'Lavash Meat', 'current_price': 25000, 'original_price': 30000, 'restaurant_reviews': 3000, 'discount_percent': 16.7},
-        {'platform': 'Express24', 'restaurant_name': 'KFC', 'promo_title': 'Basket Duo', 'current_price': 63000, 'original_price': 70000, 'restaurant_reviews': 6000, 'discount_percent': 10},
         {'platform': 'Uzum Tezkor', 'restaurant_name': 'MaxWay', 'promo_title': 'Cheese Burger', 'current_price': 35000, 'original_price': 40000, 'restaurant_reviews': 8000, 'discount_percent': 12.5},
         {'platform': 'Yandex Eda', 'restaurant_name': 'FeedUp', 'promo_title': 'Cheese Burger', 'current_price': 28000, 'original_price': 35000, 'restaurant_reviews': 1200, 'discount_percent': 20},
         {'platform': 'Uzum Tezkor', 'restaurant_name': 'Safia', 'promo_title': 'Honey Cake', 'current_price': 40000, 'original_price': 50000, 'restaurant_reviews': 10000, 'discount_percent': 20},
-        {'platform': 'Express24', 'restaurant_name': 'Yapona Mama', 'promo_title': 'Philadelphia Sushi', 'current_price': 70000, 'original_price': 100000, 'restaurant_reviews': 4500, 'discount_percent': 30},
     ]
     df = pd.DataFrame(data)
     df['category'] = df['restaurant_name'].apply(map_restaurant_category)
