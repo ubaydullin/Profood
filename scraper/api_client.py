@@ -31,7 +31,8 @@ class AsyncAPIClient:
                     await asyncio.sleep(delay)
                     delay *= 2
                 else:
-                    response.raise_for_status()
+                    print(f"[API_CLIENT] HTTP Error {response.status_code} for {endpoint}")
+                    return {}
                     
             except httpx.RequestError as e:
                 print(f"[API_CLIENT] Network error: {e}")
