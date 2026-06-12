@@ -1,0 +1,28 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environment variables
+.env
+
+# Database
+*.db
+*.sqlite3
+
+# IDEs and Editors
+.vscode/
+.idea/
+.gemini/
+.cursor/
+
+# OS generated files
+.DS_Store
+Thumbs.db
