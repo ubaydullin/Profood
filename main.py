@@ -121,7 +121,10 @@ async def run_scraper_async():
         # For now, we will print it to console to avoid spamming the user on every scrape.
         print("Top 5 Promos:")
         for p in top_promos:
-            print(f"{p['restaurant_name']} - {p['promo_title']} ({p['discount_percent']}%)")
+            try:
+                print(f"{p['restaurant_name']} - {p['promo_title']} ({p['discount_percent']}%)")
+            except UnicodeEncodeError:
+                print(f"{p['restaurant_name']} - [Cyrillic Title] ({p['discount_percent']}%)")
             
         # Uncomment to send via bot if needed
         # await send_daily_digest(top_promos)
