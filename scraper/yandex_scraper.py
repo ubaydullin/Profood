@@ -7,53 +7,75 @@ from sqlalchemy.future import select
 
 class YandexScraper:
     def __init__(self):
-        self.client = AsyncAPIClient(base_url="https://eda.yandex.uz/api/v2")
+        # We use eats.yandex.com based on the user's cURL
+        self.client = AsyncAPIClient(base_url="https://eats.yandex.com/api/v2")
+        
+        # Inject custom Yandex headers from cURL
+        self.client.headers.update({
+            'accept-language': 'ru',
+            'user-agent': 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36',
+            'x-app-version': '18.27.5',
+            'x-platform': 'mobile_web',
+            'x-client-session': 'mqamdrx9-wfjxovhoogi-a8c7vn0s6lu-a8wct5uunre',
+            'x-device-id': 'mpqmt1u5-cx1eow44764-qeed6t0gz3-anc22db3mfh'
+        })
+        
+        # You should put your cookie in the .env as YANDEX_COOKIE in production
+        import os
+        yandex_cookie = os.getenv("YANDEX_COOKIE")
+        if yandex_cookie:
+            self.client.headers['cookie'] = yandex_cookie
 
     async def scrape_promotions(self):
         print("[Yandex] Starting scrape...")
         
-        # In reality Yandex uses geocoordinates to fetch catalog: '/catalog?latitude=41.3&longitude=69.2'
-        data = await self.client.get("/catalog", params={"latitude": 41.311081, "longitude": 69.240562})
+        # In a real scenario, we first get the list of restaurants, then their menus.
+        # Here we mock the restaurant loop and fetch the menu structure provided.
+        # Example for the restaurant "mazzali_x43lr"
+        slug = "mazzali_x43lr"
+        data = await self.client.get(f"/catalog/{slug}", params={"latitude": 41.359717, "longitude": 69.380815})
         
         if not data:
-            print("[Yandex] API returned empty or failed. Endpoint might need geocoding or token.")
-            data = {"payload": {"foundPlaces": [
-                {"place": {"name": "Oqtepa Lavash", "rating": 4.5}, "promotions": [{"name": "Lavash Meat", "price": 25000, "oldPrice": 30000}]}
-            ]}}
+            print("[Yandex] API returned empty. Needs valid cookie/tokens.")
+            return
             
         async with AsyncSessionLocal() as db:
-            places = data.get("payload", {}).get("foundPlaces", [])
-            for p in places:
-                place_info = p.get("place", {})
-                promos = p.get("promotions", [])
-                
-                rest_name = place_info.get("name", "Unknown")
-                category = map_restaurant_category(rest_name)
-                
-                if category is None:
-                    continue # Filtered out
+            # Parse Yandex Restaurant Menu Payload
+            # Usually: payload -> categories -> items
+            payload = data.get("payload", {})
+            categories = payload.get("categories", [])
+            
+            # The place info might be at the root or we use the slug
+            place_info = payload.get("place", {"name": "Mazzali"})
+            rest_name = place_info.get("name", "Unknown")
+            
+            mapped_category = map_restaurant_category(rest_name)
+            if mapped_category is None:
+                return # Filtered out
                     
-                # 1. Upsert Restaurant
-                stmt = select(Restaurant).where(Restaurant.name == rest_name, Restaurant.platform == 'Yandex Eda')
-                result = await db.execute(stmt)
-                restaurant = result.scalar_one_or_none()
+            # 1. Upsert Restaurant
+            stmt = select(Restaurant).where(Restaurant.name == rest_name, Restaurant.platform == 'Yandex Eda')
+            result = await db.execute(stmt)
+            restaurant = result.scalar_one_or_none()
+            
+            if not restaurant:
+                restaurant = Restaurant(
+                    platform='Yandex Eda',
+                    name=rest_name,
+                    category=mapped_category,
+                    rating=place_info.get("rating", 0.0),
+                    reviews_count=place_info.get("reviews", 300) # Fallback
+                )
+                db.add(restaurant)
+                await db.flush()
                 
-                if not restaurant:
-                    restaurant = Restaurant(
-                        platform='Yandex Eda',
-                        name=rest_name,
-                        category=category,
-                        rating=place_info.get("rating", 0.0),
-                        reviews_count=place_info.get("reviews", 300) # Fallback
-                    )
-                    db.add(restaurant)
-                    await db.flush()
-                    
-                # 2. Add Promotions
-                for promo_data in promos:
-                    dish_name = promo_data.get("name", "Promo")
-                    price = promo_data.get("price", 0)
-                    old_price = promo_data.get("oldPrice", 0)
+            # 2. Add Promotions from categories
+            for cat in categories:
+                items = cat.get("items", [])
+                for item in items:
+                    dish_name = item.get("name", "Promo")
+                    price = item.get("price", 0)
+                    old_price = item.get("oldPrice", 0)
                     
                     if old_price > price > 0:
                         discount = round(((old_price - price) / old_price) * 100, 1)
