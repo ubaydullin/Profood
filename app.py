@@ -52,11 +52,13 @@ st.markdown("""
 # Mock Data Generation
 def get_mock_data():
     data = [
-        {'platform': 'Uzum Tezkor', 'restaurant_name': 'Evos', 'promo_title': 'Lavash Meat', 'current_price': 30000, 'restaurant_reviews': 5000, 'discount_percent': 10},
-        {'platform': 'Yandex Eda', 'restaurant_name': 'Oqtepa Lavash', 'promo_title': 'Lavash Meat', 'current_price': 25000, 'restaurant_reviews': 3000, 'discount_percent': 15},
-        {'platform': 'Uzum Tezkor', 'restaurant_name': 'MaxWay', 'promo_title': 'Cheese Burger', 'current_price': 35000, 'restaurant_reviews': 8000, 'discount_percent': 5},
-        {'platform': 'Yandex Eda', 'restaurant_name': 'FeedUp', 'promo_title': 'Cheese Burger', 'current_price': 28000, 'restaurant_reviews': 1200, 'discount_percent': 20},
-        {'platform': 'Uzum Tezkor', 'restaurant_name': 'Safia', 'promo_title': 'Honey Cake', 'current_price': 40000, 'restaurant_reviews': 10000, 'discount_percent': 0},
+        {'platform': 'Uzum Tezkor', 'restaurant_name': 'Evos', 'promo_title': 'Lavash Meat', 'current_price': 30000, 'original_price': 35000, 'restaurant_reviews': 5000, 'discount_percent': 14.3},
+        {'platform': 'Yandex Eda', 'restaurant_name': 'Oqtepa Lavash', 'promo_title': 'Lavash Meat', 'current_price': 25000, 'original_price': 30000, 'restaurant_reviews': 3000, 'discount_percent': 16.7},
+        {'platform': 'Express24', 'restaurant_name': 'KFC', 'promo_title': 'Basket Duo', 'current_price': 63000, 'original_price': 70000, 'restaurant_reviews': 6000, 'discount_percent': 10},
+        {'platform': 'Uzum Tezkor', 'restaurant_name': 'MaxWay', 'promo_title': 'Cheese Burger', 'current_price': 35000, 'original_price': 40000, 'restaurant_reviews': 8000, 'discount_percent': 12.5},
+        {'platform': 'Yandex Eda', 'restaurant_name': 'FeedUp', 'promo_title': 'Cheese Burger', 'current_price': 28000, 'original_price': 35000, 'restaurant_reviews': 1200, 'discount_percent': 20},
+        {'platform': 'Uzum Tezkor', 'restaurant_name': 'Safia', 'promo_title': 'Honey Cake', 'current_price': 40000, 'original_price': 50000, 'restaurant_reviews': 10000, 'discount_percent': 20},
+        {'platform': 'Express24', 'restaurant_name': 'Yapona Mama', 'promo_title': 'Philadelphia Sushi', 'current_price': 70000, 'original_price': 100000, 'restaurant_reviews': 4500, 'discount_percent': 30},
     ]
     df = pd.DataFrame(data)
     df['category'] = df['restaurant_name'].apply(map_restaurant_category)
@@ -72,16 +74,37 @@ with col1:
 with col2:
     st.markdown('<div class="glass-card"><div class="metric-label">Avg Discount</div><div class="metric-value" style="background: linear-gradient(90deg, #F43F5E, #EC4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">18.5%</div></div>', unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Market Activity", "Price Anomalies (Premium Brand)"])
+tab1, tab2, tab3, tab4 = st.tabs(["Top Discounts", "Product Search", "Market Overview", "Price Anomalies"])
 
 with tab1:
+    st.markdown("<h3>Top Active Discounts</h3>", unsafe_allow_html=True)
+    top_discounts = df.sort_values(by="discount_percent", ascending=False).head(5)
+    st.dataframe(top_discounts[['platform', 'restaurant_name', 'promo_title', 'discount_percent', 'current_price']], use_container_width=True, hide_index=True)
+
+with tab2:
+    st.markdown("<h3>Search Products across Platforms</h3>", unsafe_allow_html=True)
+    search_query = st.text_input("Enter product name (e.g., 'Lavash', 'Burger', 'Sushi')")
+    if search_query:
+        results = df[df['promo_title'].str.contains(search_query, case=False, na=False)]
+        if not results.empty:
+            results = results.sort_values(by="current_price", ascending=True)
+            st.dataframe(results[['platform', 'restaurant_name', 'promo_title', 'current_price', 'original_price']], use_container_width=True, hide_index=True)
+        else:
+            st.warning("No products found matching your search.")
+
+with tab3:
     st.markdown("<h3>Market by Category</h3>", unsafe_allow_html=True)
     category_counts = df.groupby(['category', 'platform']).size().reset_index(name='count')
     fig = px.bar(category_counts, x='category', y='count', color='platform', barmode='group')
     fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#E2E8F0')
     st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("<h3>Overall Market Shares</h3>", unsafe_allow_html=True)
+    pie_fig = px.pie(df, names='platform', title='Platform Dominance by Promos')
+    pie_fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='#E2E8F0')
+    st.plotly_chart(pie_fig, use_container_width=True)
 
-with tab2:
+with tab4:
     st.markdown("<h3>Brand Loyalty Anomalies</h3>", unsafe_allow_html=True)
     st.markdown("<p style='color:#94A3B8;'>Dishes that are more expensive but get bought more frequently due to brand trust.</p>", unsafe_allow_html=True)
     

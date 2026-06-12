@@ -3,7 +3,8 @@ import argparse
 import asyncio
 from scraper.uzum_scraper import UzumScraper
 from scraper.yandex_scraper import YandexScraper
-from notifications.bot import send_telegram_alert
+from scraper.express24_scraper import Express24Scraper
+from notifications.bot import send_telegram_alert, send_daily_digest, start_bot_polling
 
 def run_dashboard():
     print("Starting Promotion Intelligence Dashboard...")
@@ -13,21 +14,36 @@ async def run_scraper_async():
     print("Initializing scrapers...")
     uzum = UzumScraper()
     yandex = YandexScraper()
+    express = Express24Scraper()
     
     try:
         await asyncio.gather(
             uzum.scrape_promotions(),
-            yandex.scrape_promotions()
+            yandex.scrape_promotions(),
+            express.scrape_promotions()
         )
         print("All scraping tasks completed successfully.")
         
-        await send_telegram_alert("[Alert] Anomaly Detected: 'Lavash Meat' in Evos is 20% more expensive than Oqtepa Lavash, but has 40% more orders! Brand loyalty is strong.")
+        # In a real app we'd fetch this from DB, using mock data here
+        mock_promos = [
+            {'restaurant_name': 'Yapona Mama', 'promo_title': 'Philadelphia Sushi', 'discount_percent': 30, 'original_price': 100000, 'current_price': 70000},
+            {'restaurant_name': 'FeedUp', 'promo_title': 'Cheese Burger', 'discount_percent': 20, 'original_price': 35000, 'current_price': 28000}
+        ]
+        
+        # 1. Alert for aggressive discounts > 30%
+        for promo in mock_promos:
+            if promo['discount_percent'] >= 30:
+                await send_telegram_alert(f"🚨 <b>Aggressive Discount Alert!</b>\n{promo['restaurant_name']} dropped price on {promo['promo_title']} by {promo['discount_percent']}%!")
+        
+        # 2. Daily Digest (Top 5)
+        await send_daily_digest(mock_promos)
         
     except Exception as e:
         print(f"Error during scraping: {e}")
     finally:
         await uzum.close()
         await yandex.close()
+        await express.close()
 
 def run_scraper():
     asyncio.run(run_scraper_async())
@@ -44,4 +60,5 @@ if __name__ == "__main__":
     elif args.scrape:
         run_scraper()
     else:
-        print("Please specify --dashboard or --scrape")
+        # Run background bot
+        asyncio.run(start_bot_polling())
