@@ -2,6 +2,9 @@ import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
+from database.db import AsyncSessionLocal
+from database.models import PriceSnapshot
+from sqlalchemy import select, func
 
 load_dotenv()
 
@@ -16,7 +19,18 @@ async def cmd_health(message: types.Message):
     """
     Background bot command to check system health.
     """
-    await message.answer("✅ Система SaleScrap работает идеально.\nПоследний запуск: Недавно\nСтатус: OK")
+    try:
+        async with AsyncSessionLocal() as db:
+            stmt = select(func.max(PriceSnapshot.snapshot_at))
+            result = await db.execute(stmt)
+            latest_run = result.scalar()
+            
+            if latest_run:
+                await message.answer(f"✅ Система SaleScrap работает.\nПоследний сбор данных: {latest_run.strftime('%Y-%m-%d %H:%M:%S')}\nСтатус: OK")
+            else:
+                await message.answer("✅ Система SaleScrap запущена, но данные еще не собраны.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка проверки БД: {e}")
 
 async def send_telegram_alert(message: str):
     """

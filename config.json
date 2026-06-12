@@ -1,0 +1,22 @@
+{
+  "competitors": [
+    {
+      "name": "Mazzali",
+      "category": "Бургеры",
+      "yandex_url": "https://eats.yandex.com/ru/tashkent/r/mazzali_x43lr",
+      "uzum_url": "https://www.uzumtezkor.uz/ru/restaurant/d75814d4-dec2-419e-b466-f5d3160b3851"
+    },
+    {
+      "name": "FeedUp",
+      "category": "Фастфуд",
+      "yandex_url": "https://eats.yandex.com/ru/tashkent/r/feed_up_1_mkq8t",
+      "uzum_url": "https://www.uzumtezkor.uz/ru/restaurant/feedup-tashkent"
+    },
+    {
+      "name": "Oqtepa Lavash",
+      "category": "Фастфуд",
+      "yandex_url": "https://eats.yandex.com/ru/tashkent/r/oqtepa_lavash_ttz",
+      "uzum_url": "https://www.uzumtezkor.uz/ru/restaurant/oqtepa-lavash"
+    }
+  ]
+}

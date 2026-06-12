@@ -1,4 +1,4 @@
-import httpx
+from curl_cffi import requests
 import asyncio
 from typing import Dict, Any
 
@@ -14,7 +14,9 @@ class AsyncAPIClient:
         if custom_headers:
             self.headers.update(custom_headers)
             
-        self.client = httpx.AsyncClient(base_url=self.base_url, headers=self.headers, timeout=15.0)
+        # Using impersonate="chrome" to mimic a real browser TLS fingerprint
+        self.client = requests.AsyncSession(impersonate="chrome", headers=self.headers, timeout=15.0)
+        # requests.AsyncSession doesn't have a base_url parameter like httpx, so we handle it in get()
 
     async def get(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """
@@ -25,20 +27,27 @@ class AsyncAPIClient:
         
         for attempt in range(retries):
             try:
-                response = await self.client.get(endpoint, params=params)
+                # Combine base_url and endpoint
+                url = self.base_url.rstrip('/') + '/' + endpoint.lstrip('/')
+                response = await self.client.get(url, params=params)
                 
                 if response.status_code == 200:
-                    return response.json()
+                    try:
+                        return response.json()
+                    except:
+                        # If it's not JSON (e.g. Cloudflare captcha page)
+                        print(f"[API_CLIENT] Valid 200, but not JSON. Possible Cloudflare bypass failed.")
+                        return {}
                 elif response.status_code in [429, 403]:
-                    print(f"[API_CLIENT] Rate limited or forbidden. Retrying in {delay}s...")
+                    print(f"[API_CLIENT] Rate limited or forbidden (Code {response.status_code}). Retrying in {delay}s...")
                     await asyncio.sleep(delay)
                     delay *= 2
                 else:
                     print(f"[API_CLIENT] HTTP Error {response.status_code} for {endpoint}")
-                    print(f"[API_CLIENT] Error Body: {response.text}")
+                    print(f"[API_CLIENT] Error Body: {response.text[:200]}")
                     return {}
                     
-            except httpx.RequestError as e:
+            except Exception as e:
                 print(f"[API_CLIENT] Network error: {e}")
                 await asyncio.sleep(delay)
                 delay *= 2
@@ -46,4 +55,4 @@ class AsyncAPIClient:
         return {} # Return empty dict if all retries fail
 
     async def close(self):
-        await self.client.aclose()
+        self.client.close()

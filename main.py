@@ -1,8 +1,8 @@
 import subprocess
 import argparse
 import asyncio
-from scraper.uzum_scraper import UzumScraper
-from scraper.yandex_scraper import YandexScraper
+from scraper.uzum_scraper import scrape_uzum
+from scraper.yandex_scraper import scrape_yandex
 from notifications.bot import send_telegram_alert, send_daily_digest, start_bot_polling, close_bot_session
 from database.db import init_db
 
@@ -13,14 +13,9 @@ def run_dashboard():
 async def run_scraper_async():
     print("Initializing scrapers and database...")
     await init_db()
-    uzum = UzumScraper()
-    yandex = YandexScraper()
-    
     try:
-        await asyncio.gather(
-            uzum.scrape_promotions(),
-            yandex.scrape_promotions()
-        )
+        await scrape_uzum()
+        await scrape_yandex()
         print("All scraping tasks completed successfully.")
         
         # Export to JSON
@@ -40,7 +35,7 @@ async def run_scraper_async():
             )
             for promo, rest in result.all():
                 export_data.append({
-                    "timestamp": promo.snapshot_at.isoformat() + "Z",
+                    "timestamp": promo.first_seen_at.isoformat() + "Z",
                     "aggregator_name": rest.platform,
                     "competitor_name": rest.name,
                     "item_category": rest.category,
@@ -71,25 +66,41 @@ async def run_scraper_async():
             
         print(f"Exported {len(export_data)} records to data/export.json")
         
-        # In a real app we'd fetch this from DB, using mock data here
-        mock_promos = [
-            {'restaurant_name': 'Yapona Mama', 'promo_title': 'Philadelphia Sushi', 'discount_percent': 30, 'original_price': 100000, 'current_price': 70000},
-            {'restaurant_name': 'FeedUp', 'promo_title': 'Cheese Burger', 'discount_percent': 20, 'original_price': 35000, 'current_price': 28000}
-        ]
+        # Fetch top promos from DB for the digest
+        from datetime import datetime, timedelta
+        yesterday = datetime.utcnow() - timedelta(days=1)
         
-        # 1. Alert for aggressive discounts > 30%
-        for promo in mock_promos:
-            if promo['discount_percent'] >= 30:
+        async with AsyncSessionLocal() as db:
+            stmt = (
+                select(Promotion, Restaurant)
+                .join(Restaurant)
+                .where(Promotion.is_active == True)
+                .where(Promotion.first_seen_at >= yesterday)
+                .order_by(Promotion.discount_percent.desc())
+                .limit(5)
+            )
+            result = await db.execute(stmt)
+            top_promos = []
+            for promo, rest in result.all():
+                top_promos.append({
+                    'restaurant_name': rest.name,
+                    'promo_title': promo.title,
+                    'discount_percent': promo.discount_percent,
+                    'original_price': promo.original_price,
+                    'current_price': promo.current_price
+                })
+        
+        # 1. Alert for aggressive discounts > 20%
+        for promo in top_promos:
+            if promo['discount_percent'] >= 20:
                 await send_telegram_alert(f"🚨 <b>Агрессивная скидка!</b>\n{promo['restaurant_name']} снизил цену на {promo['promo_title']} на {promo['discount_percent']}%!")
         
         # 2. Daily Digest (Top 5)
-        await send_daily_digest(mock_promos)
+        await send_daily_digest(top_promos)
         
     except Exception as e:
         print(f"Error during scraping: {e}")
     finally:
-        await uzum.close()
-        await yandex.close()
         await close_bot_session()
 
 def run_scraper():

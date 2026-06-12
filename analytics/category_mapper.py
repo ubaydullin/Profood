@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional
+import re
 
 # Simple mapping logic for Tashkent restaurants
 CATEGORY_MAP: Dict[str, List[str]] = {
@@ -17,6 +18,17 @@ IGNORE_KEYWORDS: List[str] = [
     "супермаркет", "market", "korzinka", "makro", "heves",
     "косметика", "cosmetics"
 ]
+
+def normalize_restaurant_name(restaurant_name: str) -> str:
+    """
+    Strips branch information to deduplicate chains.
+    e.g., 'Oqtepa Lavash (Ц-1)' -> 'Oqtepa Lavash'
+    """
+    # Remove text in parentheses
+    name = re.sub(r'\(.*?\)', '', restaurant_name)
+    # Remove common branch keywords
+    name = re.sub(r'(?i)\b(филиал|улица|мкр|район|yunusobod|chilonzor|yashnobod|tashkent)\b.*', '', name)
+    return name.strip()
 
 def map_restaurant_category(restaurant_name: str) -> Optional[str]:
     """
