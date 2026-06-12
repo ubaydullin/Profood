@@ -16,7 +16,7 @@ async def cmd_health(message: types.Message):
     """
     Background bot command to check system health.
     """
-    await message.answer("✅ SaleScrap System is running perfectly.\nLast Scraper Run: Recently\nStatus: OK")
+    await message.answer("✅ Система SaleScrap работает идеально.\nПоследний запуск: Недавно\nСтатус: OK")
 
 async def send_telegram_alert(message: str):
     """
@@ -38,10 +38,10 @@ async def send_daily_digest(top_promos: list):
     if not top_promos:
         return
         
-    msg = "📊 <b>Daily Top 5 Discounts Digest</b>\n\n"
+    msg = "📊 <b>Ежедневный Дайджест: ТОП-5 Скидок</b>\n\n"
     for idx, p in enumerate(top_promos[:5], 1):
         msg += f"{idx}. <b>{p['restaurant_name']}</b> - {p['promo_title']}\n"
-        msg += f"   Discount: {p['discount_percent']}% (Old: {p['original_price']}, New: {p['current_price']})\n\n"
+        msg += f"   Скидка: {p['discount_percent']}% (Старая цена: {p['original_price']}, Новая: {p['current_price']})\n\n"
         
     await send_telegram_alert(msg)
 

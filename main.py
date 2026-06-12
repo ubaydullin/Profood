@@ -32,7 +32,7 @@ async def run_scraper_async():
         # 1. Alert for aggressive discounts > 30%
         for promo in mock_promos:
             if promo['discount_percent'] >= 30:
-                await send_telegram_alert(f"🚨 <b>Aggressive Discount Alert!</b>\n{promo['restaurant_name']} dropped price on {promo['promo_title']} by {promo['discount_percent']}%!")
+                await send_telegram_alert(f"🚨 <b>Агрессивная скидка!</b>\n{promo['restaurant_name']} снизил цену на {promo['promo_title']} на {promo['discount_percent']}%!")
         
         # 2. Daily Digest (Top 5)
         await send_daily_digest(mock_promos)
