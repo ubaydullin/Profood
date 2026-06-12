@@ -55,3 +55,10 @@ async def start_bot_polling():
         return
     await dp.start_polling(bot)
 
+async def close_bot_session():
+    """
+    Closes the aiohttp session for the bot.
+    """
+    if bot.session:
+        await bot.session.close()
+

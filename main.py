@@ -4,7 +4,7 @@ import asyncio
 from scraper.uzum_scraper import UzumScraper
 from scraper.yandex_scraper import YandexScraper
 from scraper.express24_scraper import Express24Scraper
-from notifications.bot import send_telegram_alert, send_daily_digest, start_bot_polling
+from notifications.bot import send_telegram_alert, send_daily_digest, start_bot_polling, close_bot_session
 
 def run_dashboard():
     print("Starting Promotion Intelligence Dashboard...")
@@ -44,6 +44,7 @@ async def run_scraper_async():
         await uzum.close()
         await yandex.close()
         await express.close()
+        await close_bot_session()
 
 def run_scraper():
     asyncio.run(run_scraper_async())
