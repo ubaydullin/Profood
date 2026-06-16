@@ -14,13 +14,10 @@ import asyncio
 import json
 import os
 import re
-from datetime import datetime
 
-from sqlalchemy.future import select
 
-from analytics.category_mapper import map_restaurant_category, normalize_restaurant_name
 from database.db import AsyncSessionLocal
-from database.models import Promotion, PriceSnapshot, Restaurant
+from database.models import ParsedPromo
 from scraper.api_client import AsyncAPIClient
 from scraper.geo_rotator import get_random_point
 
@@ -62,7 +59,9 @@ async def async_scrape_yandex() -> list[dict]:
         },
     )
 
-    for url in links:
+    RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart"}
+
+    for idx, url in enumerate(links):
         try:
             slug_match = re.search(r"placeSlug=([^&]+)", url)
             if not slug_match:
@@ -84,6 +83,14 @@ async def async_scrape_yandex() -> list[dict]:
                 print(f"[Yandex Eda] Failed to get valid data for {slug}")
                 continue
 
+            place = data["payload"].get("place", {})
+            rest_name = place.get("name", rest_name)
+
+            # Skip retail trash
+            if any(trash in rest_name.lower() for trash in RETAIL_TRASH):
+                print(f"[Yandex Eda] Skipping retail/trash: {rest_name}")
+                continue
+
             items: list[dict] = []
             categories = data["payload"].get("categories", [])
             for cat in categories:
@@ -98,7 +105,8 @@ async def async_scrape_yandex() -> list[dict]:
                 promo_count = sum(1 for it in items if it["has_promo"])
                 results.append(
                     {
-                        "name": rest_name,
+                        "name": rest_name.strip().title(),
+                        "position": idx + 1,
                         "rating": 4.8,  # TODO: extract from launch API
                         "reviews": 100,
                         "delivery_fee": 15000,
@@ -237,141 +245,58 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
 
 
 async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
-    """Save parsed Yandex results to the database.
-
-    Creates/updates Restaurant, Promotion, and PriceSnapshot records.
-    Tracks price history for analytics.
-
-    Args:
-        results: List of restaurant dicts from async_scrape_yandex().
-
-    Returns:
-        Tuple of (restaurants_count, promos_count, errors_count).
-    """
     promos_count = 0
     errors_count = 0
 
     async with AsyncSessionLocal() as db:
         for data in results:
             try:
-                raw_name = data["name"]
-                rest_name = normalize_restaurant_name(raw_name)
-                mapped_category = map_restaurant_category(rest_name) or "Other"
-
-                stmt = select(Restaurant).where(
-                    Restaurant.name == rest_name,
-                    Restaurant.platform == "Yandex Eda",
-                )
-                result = await db.execute(stmt)
-                restaurant = result.scalar_one_or_none()
-
-                if not restaurant:
-                    restaurant = Restaurant(
-                        platform="Yandex Eda",
-                        name=rest_name,
-                        category=mapped_category,
-                        rating_score=data["rating"],
-                        reviews_count=data["reviews"],
-                        delivery_fee=data["delivery_fee"],
-                        service_fee=1000,
-                        min_order_value=data["min_order"],
-                        delivery_time_min=20,
-                        delivery_time_max=45,
-                        free_delivery_threshold=data["free_delivery_threshold"],
-                        position_in_list=1,
-                        is_in_carousel=False,
-                        search_query_used="Feed",
-                    )
-                    db.add(restaurant)
-                    await db.flush()
-                else:
-                    restaurant.delivery_fee = data["delivery_fee"]
-                    restaurant.free_delivery_threshold = data["free_delivery_threshold"]
-                    await db.flush()
-
+                parsed_promos = []
                 for item in data["items"]:
                     price = item["price"]
                     old_price = item["old_price"]
                     has_promo = item["has_promo"]
 
-                    # Always save price snapshot for history tracking
-                    snapshot = PriceSnapshot(
-                        restaurant_id=restaurant.id,
-                        item_name=item["name"],
-                        price=price,
-                        old_price=old_price if old_price > price else None,
-                        is_discounted=has_promo,
-                    )
-                    db.add(snapshot)
-
                     if has_promo and old_price > price > 0:
                         promos_count += 1
                         discount = round(((old_price - price) / old_price) * 100, 1)
-
-                        promo_stmt = select(Promotion).where(
-                            Promotion.restaurant_id == restaurant.id,
-                            Promotion.title == item["name"],
-                        )
-                        promo_result = await db.execute(promo_stmt)
-                        promo = promo_result.scalar_one_or_none()
-
-                        if not promo:
-                            new_promo = Promotion(
-                                restaurant_id=restaurant.id,
-                                title=item["name"],
-                                description=item.get("promo_condition", ""),
-                                original_price=old_price,
-                                current_price=price,
-                                discount_percent=discount,
-                                promo_type=item.get("promo_type", "discount"),
-                                promo_target="item_level",
-                                promo_condition=item.get(
-                                    "promo_condition",
-                                    "Скидка от заведения",
-                                ),
-                                discount_threshold=None,
-                                is_aggregator_funded=False,
-                                is_active=True,
-                            )
-                            db.add(new_promo)
-                        else:
-                            promo.current_price = price
-                            promo.original_price = old_price
-                            promo.discount_percent = discount
-                            promo.is_active = True
-                            promo.last_seen_at = datetime.utcnow()
-                            if item.get("promo_condition"):
-                                promo.promo_condition = item["promo_condition"]
-
+                        promo_type = item.get("promo_type", "discount")
                     elif has_promo and old_price == price:
-                        # Promo set/combo without explicit discount
                         promos_count += 1
-                        promo_stmt = select(Promotion).where(
-                            Promotion.restaurant_id == restaurant.id,
-                            Promotion.title == item["name"],
-                        )
-                        promo_result = await db.execute(promo_stmt)
-                        promo = promo_result.scalar_one_or_none()
-
-                        if not promo:
-                            new_promo = Promotion(
-                                restaurant_id=restaurant.id,
-                                title=item["name"],
-                                description=item.get("promo_condition", ""),
-                                original_price=old_price,
-                                current_price=price,
-                                discount_percent=0,
-                                promo_type=item.get("promo_type", "promo_set"),
-                                promo_target="item_level",
-                                promo_condition=item.get(
-                                    "promo_condition",
-                                    "Промо-набор",
-                                ),
-                                discount_threshold=None,
-                                is_aggregator_funded=False,
-                                is_active=True,
-                            )
-                            db.add(new_promo)
+                        discount = 0.0
+                        promo_type = item.get("promo_type", "promo_set")
+                    else:
+                        discount = 0.0
+                        promo_type = "standard"
+                        
+                    promo = ParsedPromo(
+                        aggregator_name="Yandex Eda",
+                        competitor_name=data["name"],
+                        item_category=item.get("category", "Other"),
+                        item_name=item["name"],
+                        base_price=old_price if old_price > price else price,
+                        promo_price=price if has_promo else None,
+                        discount_percent=discount if has_promo else None,
+                        promo_type=promo_type,
+                        promo_target="item_level",
+                        promo_condition=item.get("promo_condition", "Скидка от заведения") if has_promo else None,
+                        free_delivery_threshold=data["free_delivery_threshold"],
+                        discount_threshold=None,
+                        is_aggregator_funded=False,
+                        delivery_fee=data["delivery_fee"],
+                        service_fee=1000,
+                        min_order_value=data["min_order"],
+                        delivery_time_min=20,
+                        delivery_time_max=45,
+                        position_in_list=data.get("position", 1),
+                        is_in_carousel=False,
+                        search_query_used="Feed",
+                        rating_score=data["rating"],
+                        reviews_count=data["reviews"]
+                    )
+                    parsed_promos.append(promo)
+                
+                db.add_all(parsed_promos)
 
             except Exception as e:
                 errors_count += 1
@@ -380,6 +305,7 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
         await db.commit()
 
     return len(results), promos_count, errors_count
+
 
 
 async def scrape_yandex() -> tuple[int, int, int]:

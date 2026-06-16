@@ -1,86 +1,47 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean
-from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
+from typing import Optional
+
+from sqlalchemy import Integer, String, Float, Boolean, DateTime
+from sqlalchemy.orm import declarative_base, Mapped, mapped_column
 
 Base = declarative_base()
 
+class ParsedPromo(Base):
+    """
+    Единая плоская таблица для хранения результатов парсинга агрегаторов доставки еды,
+    содержащая всю информацию о заведении, конкретном товаре и условиях акции.
+    """
+    __tablename__ = "parsed_promos"
 
-class Restaurant(Base):
-    __tablename__ = "restaurants"
+    # БЛОК 1: Идентификация и Время
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    aggregator_name: Mapped[str] = mapped_column(String, index=True)
+    competitor_name: Mapped[str] = mapped_column(String, index=True)
 
-    id = Column(Integer, primary_key=True, index=True)
-    platform = Column(String, index=True)  # 'Uzum Tezkor' or 'Yandex Eda'
-    name = Column(String, index=True)
-    category = Column(String, default="Uncategorized")
+    # БЛОК 2: Товар и Ценообразование
+    item_category: Mapped[str] = mapped_column(String, default="Uncategorized")
+    item_name: Mapped[str] = mapped_column(String, index=True)
+    base_price: Mapped[float] = mapped_column(Float)
+    promo_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    discount_percent: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
-    # Social Proof
-    rating_score = Column(Float, nullable=True)
-    reviews_count = Column(Integer, default=0)
+    # БЛОК 3: Условия Акций (Promo Constraints)
+    promo_type: Mapped[str] = mapped_column(String, default="standard")
+    promo_target: Mapped[str] = mapped_column(String, default="item_level")
+    free_delivery_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    discount_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    promo_condition: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_aggregator_funded: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Pricing & Cart Metrics
-    delivery_fee = Column(Float, nullable=True)
-    service_fee = Column(Float, nullable=True)
-    min_order_value = Column(Float, nullable=True)
-    delivery_time_min = Column(Integer, nullable=True)
-    delivery_time_max = Column(Integer, nullable=True)
-    free_delivery_threshold = Column(Float, nullable=True)
-
-    # Visibility Metrics (last known)
-    position_in_list = Column(Integer, nullable=True)
-    is_in_carousel = Column(Boolean, default=False)
-    search_query_used = Column(String, nullable=True)
-
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    promotions = relationship(
-        "Promotion", back_populates="restaurant", cascade="all, delete-orphan"
-    )
-    snapshots = relationship(
-        "PriceSnapshot", back_populates="restaurant", cascade="all, delete-orphan"
-    )
-
-
-class Promotion(Base):
-    __tablename__ = "promotions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    restaurant_id = Column(Integer, ForeignKey("restaurants.id"))
-    title = Column(String, index=True)  # Name of the item
-    description = Column(String, nullable=True)
-
-    original_price = Column(Float, nullable=True)
-    current_price = Column(Float, nullable=True)
-    discount_percent = Column(Float, nullable=True)
-
-    # Promo Constraints
-    promo_type = Column(
-        String, default="standard"
-    )  # 'discount', 'free_delivery', '1+1', 'standard' (no promo)
-    promo_target = Column(
-        String, default="item_level"
-    )  # 'item_level', 'cart_level', 'delivery'
-    promo_condition = Column(String, nullable=True)
-    discount_threshold = Column(Float, nullable=True)
-    is_aggregator_funded = Column(Boolean, default=False)
-
-    is_active = Column(Boolean, default=True)  # Is it currently on the menu?
-    first_seen_at = Column(DateTime, default=datetime.utcnow)
-    last_seen_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    restaurant = relationship("Restaurant", back_populates="promotions")
-
-
-class PriceSnapshot(Base):
-    __tablename__ = "price_snapshots"
-
-    id = Column(Integer, primary_key=True, index=True)
-    restaurant_id = Column(Integer, ForeignKey("restaurants.id"))
-    item_name = Column(String, index=True)
-
-    price = Column(Float)
-    old_price = Column(Float, nullable=True)  # If it was a discount
-    is_discounted = Column(Boolean, default=False)
-
-    snapshot_at = Column(DateTime, default=datetime.utcnow)
-
-    restaurant = relationship("Restaurant", back_populates="snapshots")
+    # БЛОК 4: Доставка и Видимость (Delivery & Visibility)
+    delivery_fee: Mapped[float] = mapped_column(Float)
+    service_fee: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    min_order_value: Mapped[float] = mapped_column(Float)
+    delivery_time_min: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    delivery_time_max: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    position_in_list: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_in_carousel: Mapped[bool] = mapped_column(Boolean, default=False)
+    search_query_used: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    rating_score: Mapped[float] = mapped_column(Float, default=4.5)
+    reviews_count: Mapped[int] = mapped_column(Integer, default=0)

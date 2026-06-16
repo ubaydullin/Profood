@@ -18,11 +18,10 @@ import json
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-from sqlalchemy.future import select
 
 from analytics.category_mapper import map_restaurant_category, normalize_restaurant_name
 from database.db import AsyncSessionLocal
-from database.models import Promotion, PriceSnapshot, Restaurant
+from database.models import ParsedPromo
 from scraper.api_client import AsyncAPIClient
 from scraper.geo_rotator import get_random_point
 
@@ -144,7 +143,15 @@ async def scrape_uzum() -> tuple[int, int, int]:
     results = []
 
     # Process vendors
+    RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart"}
+
     for idx, vendor_data in enumerate(vendors):
+        title = vendor_data.get("title", "Unknown")
+        
+        # Skip retail trash to avoid data pollution
+        if any(trash in title.lower() for trash in RETAIL_TRASH):
+            print(f"[Uzum Tezkor] Skipping retail/trash: {title}")
+            continue
         info = vendor_data.get("info", {})
         vendor_id = info.get("id")
         title = info.get("name", "Unknown")
@@ -208,7 +215,8 @@ async def scrape_uzum() -> tuple[int, int, int]:
 
         results.append(
             {
-                "name": title,
+                "name": title.strip().title(),
+                "position": idx + 1,
                 "rating": rating,
                 "reviews": 0,  # Info might not contain review count
                 "delivery_fee": delivery_fee,
@@ -317,99 +325,57 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
     errors_count = 0
 
     async with AsyncSessionLocal() as db:
+        now = datetime.utcnow()
+        parsed_promos = []
         for data in results:
             try:
                 raw_name = data["name"]
                 rest_name = normalize_restaurant_name(raw_name)
                 mapped_category = map_restaurant_category(rest_name) or "Other"
 
-                stmt = select(Restaurant).where(
-                    Restaurant.name == rest_name,
-                    Restaurant.platform == "Uzum Tezkor",
-                )
-                result = await db.execute(stmt)
-                restaurant = result.scalar_one_or_none()
-
-                if not restaurant:
-                    restaurant = Restaurant(
-                        platform="Uzum Tezkor",
-                        name=rest_name,
-                        category=mapped_category,
-                        rating_score=data["rating"],
-                        reviews_count=data["reviews"],
-                        delivery_fee=data["delivery_fee"],
-                        service_fee=1000,
-                        min_order_value=data["min_order"],
-                        delivery_time_min=20,
-                        delivery_time_max=45,
-                        free_delivery_threshold=data["free_delivery_threshold"],
-                        position_in_list=1,
-                        is_in_carousel=False,
-                        search_query_used="Feed",
-                    )
-                    db.add(restaurant)
-                    await db.flush()
-                else:
-                    restaurant.delivery_fee = data["delivery_fee"]
-                    restaurant.free_delivery_threshold = data["free_delivery_threshold"]
-                    await db.flush()
-
                 for item in data["items"]:
                     price = item["price"]
                     old_price = item["old_price"]
                     has_promo = item["has_promo"]
 
-                    # Always save price snapshot for history tracking
-                    snapshot = PriceSnapshot(
-                        restaurant_id=restaurant.id,
-                        item_name=item["name"],
-                        price=price,
-                        old_price=old_price if old_price > price else None,
-                        is_discounted=has_promo,
-                    )
-                    db.add(snapshot)
-
                     if has_promo and old_price > price > 0:
                         promos_count += 1
                         discount = round(((old_price - price) / old_price) * 100, 1)
 
-                        promo_stmt = select(Promotion).where(
-                            Promotion.restaurant_id == restaurant.id,
-                            Promotion.title == item["name"],
+                        promo = ParsedPromo(
+                            timestamp=now,
+                            aggregator_name="Uzum Tezkor",
+                            competitor_name=rest_name,
+                            item_category=mapped_category,
+                            item_name=item["name"],
+                            base_price=old_price,
+                            promo_price=price,
+                            discount_percent=discount,
+                            promo_type=item.get("promo_type", "discount"),
+                            promo_target="item_level",
+                            promo_condition=item.get("promo_condition", "Скидка от заведения"),
+                            position_in_list=data.get("position", 1),
+                            is_in_carousel=False,
+                            free_delivery_threshold=data["free_delivery_threshold"],
+                            discount_threshold=None,
+                            is_aggregator_funded=False,
+                            delivery_fee=data["delivery_fee"],
+                            service_fee=1000,
+                            min_order_value=data["min_order"],
+                            delivery_time_min=20,
+                            delivery_time_max=45,
+                            search_query_used="Feed",
+                            rating_score=data["rating"],
+                            reviews_count=data["reviews"]
                         )
-                        promo_result = await db.execute(promo_stmt)
-                        promo = promo_result.scalar_one_or_none()
-
-                        if not promo:
-                            new_promo = Promotion(
-                                restaurant_id=restaurant.id,
-                                title=item["name"],
-                                description="",
-                                original_price=old_price,
-                                current_price=price,
-                                discount_percent=discount,
-                                promo_type=item.get("promo_type", "discount"),
-                                promo_target="item_level",
-                                promo_condition=item.get(
-                                    "promo_condition",
-                                    "Скидка от заведения",
-                                ),
-                                discount_threshold=None,
-                                is_aggregator_funded=False,
-                                is_active=True,
-                            )
-                            db.add(new_promo)
-                        else:
-                            promo.current_price = price
-                            promo.original_price = old_price
-                            promo.discount_percent = discount
-                            promo.is_active = True
-                            promo.last_seen_at = datetime.utcnow()
+                        parsed_promos.append(promo)
 
             except Exception as e:
                 errors_count += 1
                 print(f"[Uzum Tezkor] DB error for {data.get('name', '?')}: {e}")
 
-        await db.commit()
+        if parsed_promos:
+            db.add_all(parsed_promos)
+            await db.commit()
 
     return len(results), promos_count, errors_count

@@ -3,7 +3,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from dotenv import load_dotenv
 from database.db import AsyncSessionLocal
-from database.models import PriceSnapshot
+from database.models import ParsedPromo
 from sqlalchemy import select, func
 
 load_dotenv()
@@ -22,7 +22,7 @@ async def cmd_health(message: types.Message):
     """
     try:
         async with AsyncSessionLocal() as db:
-            stmt = select(func.max(PriceSnapshot.snapshot_at))
+            stmt = select(func.max(ParsedPromo.timestamp))
             result = await db.execute(stmt)
             latest_run = result.scalar()
 

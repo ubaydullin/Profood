@@ -31,113 +31,93 @@ async def run_scraper_async():
         import os
         from sqlalchemy.future import select
         from database.db import AsyncSessionLocal
-        from database.models import Promotion, Restaurant
-
+        from database.models import ParsedPromo
+        
         os.makedirs("data", exist_ok=True)
         export_data = []
-
+        
+        # We find the latest scrape batch by fetching the maximum timestamp minus a small buffer
+        # But actually, since the DB will have all history, we export everything for the dashboard
         async with AsyncSessionLocal() as db:
-            result = await db.execute(select(Promotion, Restaurant).join(Restaurant))
-            for promo, rest in result.all():
-                export_data.append(
-                    {
-                        "timestamp": promo.first_seen_at.isoformat() + "Z",
-                        "aggregator_name": rest.platform,
-                        "competitor_name": rest.name,
-                        "item_category": rest.category,
-                        "item_name": promo.title,
-                        "base_price": promo.original_price or promo.current_price,
-                        "promo_price": promo.current_price,
-                        "discount_percent": promo.discount_percent,
-                        "promo_type": promo.promo_type,
-                        "promo_target": promo.promo_target,
-                        "promo_condition": promo.promo_condition,
-                        "discount_threshold": promo.discount_threshold,
-                        "is_aggregator_funded": promo.is_aggregator_funded,
-                        "search_query_used": rest.search_query_used,
-                        "position_in_list": rest.position_in_list,
-                        "is_in_carousel": rest.is_in_carousel,
-                        "delivery_fee": rest.delivery_fee,
-                        "service_fee": rest.service_fee,
-                        "min_order_value": rest.min_order_value,
-                        "delivery_time_min": rest.delivery_time_min,
-                        "delivery_time_max": rest.delivery_time_max,
-                        "free_delivery_threshold": rest.free_delivery_threshold,
-                        "rating_score": rest.rating_score,
-                        "reviews_count": rest.reviews_count,
-                    }
-                )
-
+            result = await db.execute(select(ParsedPromo))
+            promos = result.scalars().all()
+            for promo in promos:
+                export_data.append({
+                    "timestamp": promo.timestamp.isoformat() + "Z",
+                    "aggregator_name": promo.aggregator_name,
+                    "competitor_name": promo.competitor_name,
+                    "item_category": promo.item_category,
+                    "item_name": promo.item_name,
+                    "base_price": promo.base_price,
+                    "promo_price": promo.promo_price,
+                    "discount_percent": promo.discount_percent,
+                    "promo_type": promo.promo_type,
+                    "promo_target": promo.promo_target,
+                    "promo_condition": promo.promo_condition,
+                    "discount_threshold": promo.discount_threshold,
+                    "is_aggregator_funded": promo.is_aggregator_funded,
+                    "search_query_used": promo.search_query_used,
+                    "position_in_list": promo.position_in_list,
+                    "is_in_carousel": promo.is_in_carousel,
+                    "delivery_fee": promo.delivery_fee,
+                    "service_fee": promo.service_fee,
+                    "min_order_value": promo.min_order_value,
+                    "delivery_time_min": promo.delivery_time_min,
+                    "delivery_time_max": promo.delivery_time_max,
+                    "free_delivery_threshold": promo.free_delivery_threshold,
+                    "rating_score": promo.rating_score,
+                    "reviews_count": promo.reviews_count
+                })
+        
         with open("data/export.json", "w", encoding="utf-8") as f:
             json.dump(export_data, f, ensure_ascii=False, indent=2)
-
+            
         print(f"Exported {len(export_data)} records to data/export.json")
-
-        # Fetch top promos from DB for the digest
-        from datetime import datetime, timedelta
-
-        yesterday = datetime.utcnow() - timedelta(days=1)
-
-        async with AsyncSessionLocal() as db:
-            stmt = (
-                select(Promotion, Restaurant)
-                .join(Restaurant)
-                .where(Promotion.is_active == True)
-                .where(Promotion.first_seen_at >= yesterday)
-                .order_by(Promotion.discount_percent.desc())
-                .limit(5)
-            )
-            result = await db.execute(stmt)
-            top_promos = []
-            for promo, rest in result.all():
-                top_promos.append(
-                    {
-                        "restaurant_name": rest.name,
-                        "promo_title": promo.title,
-                        "discount_percent": promo.discount_percent,
-                        "original_price": promo.original_price,
-                        "current_price": promo.current_price,
-                        "first_seen_at": promo.first_seen_at,
-                    }
-                )
-
-        # 1. Alert for aggressive discounts > 20% (ONLY IF NEW)
-        now = datetime.utcnow()
-        recent_threshold = now - timedelta(minutes=15)
-
-        urgent_promos = [
-            p
-            for p in top_promos
-            if p["discount_percent"] >= 20 and p["first_seen_at"] >= recent_threshold
-        ]
+        
+        # Fetch top promos from the LATEST batch for the digest
+        from datetime import timedelta
+        
+        top_promos = []
+        if promos:
+            latest_time = max(p.timestamp for p in promos)
+            recent_threshold = latest_time - timedelta(minutes=30)
+            
+            recent_promos = [p for p in promos if p.timestamp >= recent_threshold and p.discount_percent]
+            recent_promos.sort(key=lambda x: x.discount_percent, reverse=True)
+            
+            for promo in recent_promos[:5]:
+                top_promos.append({
+                    'restaurant_name': promo.competitor_name,
+                    'promo_title': promo.item_name,
+                    'discount_percent': promo.discount_percent,
+                    'original_price': promo.base_price,
+                    'current_price': promo.promo_price,
+                    'first_seen_at': promo.timestamp
+                })
+        
+        # 1. Alert for aggressive discounts > 20% (ONLY IF NEW BATCH)
+        urgent_promos = [p for p in top_promos if p['discount_percent'] >= 20]
         if urgent_promos:
             msg = "🚨 <b>Внимание! Активность конкурентов!</b> 🚨\n\n"
             for p in urgent_promos[:5]:
                 msg += f"🔥 <b>{p['restaurant_name']}</b>\n"
                 msg += f"Акция: Скидка: {p['promo_title']}\n"
                 msg += f"Скидка: {p['discount_percent']}%\n\n"
-
+                
             remaining = len(urgent_promos) - 5
             if remaining > 0:
                 msg += f"...и еще {remaining} агрессивных акций. Проверьте дашборд."
             else:
                 msg += "Проверьте дашборд."
-
+                
             await send_telegram_alert(msg)
-
-        # 2. Daily Digest (Top 5)
-        # We only send the digest if specifically requested or if it's a specific time.
-        # For now, we will print it to console to avoid spamming the user on every scrape.
+        
         print("Top 5 Promos:")
         for p in top_promos:
             try:
-                print(
-                    f"{p['restaurant_name']} - {p['promo_title']} ({p['discount_percent']}%)"
-                )
+                print(f"{p['restaurant_name']} - {p['promo_title']} ({p['discount_percent']}%)")
             except UnicodeEncodeError:
-                print(
-                    f"{p['restaurant_name']} - [Cyrillic Title] ({p['discount_percent']}%)"
-                )
+                print(f"{p['restaurant_name']} - [Cyrillic Title] ({p['discount_percent']}%)")
 
         # Uncomment to send via bot if needed
         # await send_daily_digest(top_promos)
