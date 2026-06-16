@@ -1,61 +1,58 @@
-# Profood SaleScrap - Food Delivery Intelligence
+# Profood SaleScrap - BI Platform для мониторинга акций доставки
 
-SaleScrap is a competitive intelligence tool designed for the BizDev department. It automates the scraping, monitoring, and analysis of food delivery promotions across major aggregators in Uzbekistan (Uzum Tezkor, Yandex Eda).
+SaleScrap — это мощная аналитическая система (BI) для BizDev-отдела, которая автоматически собирает, анализирует и визуализирует скидки в агрегаторах еды Узбекистана (Uzum Tezkor, Yandex Eda).
 
-## Features
+## 🚀 Как запускать (Основные команды)
 
-*   **Asynchronous Scraping:** High-performance data ingestion using `asyncio` and `httpx`.
-*   **Retail Filtering:** Built-in blacklists to filter out data pollution (e.g., supermarkets, pharmacies, pet stores).
-*   **Time-Series Tracking:** Preserves historical parsing data to track promotion dynamics over time.
-*   **Interactive Dashboard (Streamlit):**
-    *   **Price vs Trust Index:** Analyzes the relationship between discount magnitude and restaurant rating.
-    *   **True Cost Analysis:** Calculates the real cost for the customer by factoring in delivery fees, service fees, and discounts.
-    *   **Visibility Gap (Funnel):** Tracks exactly where the restaurant appears in the aggregator's feed.
-*   **Telegram Notifications:** Automated alerts for aggressive competitor discounts and parsing stats summaries.
+Система спроектирована так, чтобы её модули можно было запускать независимо друг от друга в разных окнах терминала.
 
-## Tech Stack
+Все команды запускаются через `uv run python main.py` с определенными флагами:
 
-*   **Language:** Python 3.12+
-*   **Package Manager:** `uv`
-*   **Database:** SQLite via SQLAlchemy 2.0 (Async)
-*   **Dashboard:** Streamlit & Plotly Express
-*   **Linting & Formatting:** Ruff
+### 1. 📺 Дашборд (Визуализация данных)
+Запускает интерактивный веб-дашборд в браузере.
+```bash
+uv run python main.py --dashboard
+```
+*Что делает:* Открывает дашборд с 4 вкладками аналитики, блоком Top-Level KPI (с дельтами для брендов) и возможностью включить "TV-режим" с автообновлением каждые 5 минут.
 
-## Setup & Installation
+### 2. 🤖 Telegram-бот (Слушатель 24/7)
+Запускает бота в фоновом режиме ожидания команд от пользователей.
+```bash
+uv run python main.py
+```
+*(Обратите внимание: без флагов)*
+*Что делает:* Бот круглосуточно слушает чат. Поддерживает команды `/top`, `/search <название>` и `/health`. При запросе генерирует красивые графические карточки с кнопками-ссылками.
 
-This project strictly uses `uv` for dependency management.
+### 3. 🔄 Авто-парсер (Цикличный сбор)
+Запускает бесконечный цикл сбора данных.
+```bash
+uv run python main.py --auto
+```
+*Что делает:* Собирает цены со всех агрегаторов, сохраняет в базу, отправляет дайджест в Telegram, после чего "засыпает" на 60 минут. При ошибках сети автоматически перезапускается через 5 минут.
 
-1.  **Sync Dependencies:**
-    ```bash
-    uv sync
-    ```
+### 4. ⚡ Ручной парсинг (Единоразовый сбор)
+Выполняет сбор данных ровно 1 раз и закрывается.
+```bash
+uv run python main.py --scrape
+```
+*Что делает:* Удобно для ручной проверки или если вы хотите настроить запуск через свой системный планировщик задач (cron / Windows Task Scheduler).
 
-2.  **Run the Scraper Pipeline:**
-    Run the full ingestion cycle (Uzum + Yandex) to populate the database:
-    ```bash
-    uv run python main.py --scrape
-    ```
+---
 
-3.  **Launch the Analytics Dashboard:**
-    ```bash
-    uv run python main.py --dashboard
-    ```
+## 📱 Команды Telegram-бота
 
-## Project Structure
+Если вы запустили процесс бота (`uv run python main.py`), вы можете отправлять ему следующие команды в Telegram:
 
-*   `main.py` - Application entry point.
-*   `app.py` - Streamlit analytics dashboard.
-*   `scraper/` - Async web scrapers for Yandex and Uzum.
-*   `database/` - SQLAlchemy models (flat architecture) and connection configuration.
-*   `analytics/` - Mapping logic, anomaly detection, and data processing.
-*   `notifications/` - Telegram bot polling and alert mechanisms.
-*   `data/` - Static JSON exports for reporting (`export.json`).
+*   `/top` — Присылает графическую карточку самой агрессивной скидки на рынке прямо сейчас (с перечеркнутой ценой и кнопкой для перехода в ресторан).
+*   `/search <название>` — Ищет товар или ресторан по базе (например: `/search лаваш` или `/search пицца`). Присылает картинку лучшей найденной скидки.
+*   `/health` — Проверяет статус базы данных и показывает время последнего успешного парсинга.
 
-## Testing & Linting
+## 🛠 Технологический стек
 
-*   **Lint & Format:** `uv run ruff check . && uv run ruff format .`
-*   **Type Check:** `uv run mypy .`
-
-## Contributing
-
-Please adhere to Conventional Commits and ensure all CI checks pass before merging.
+*   **Язык:** Python 3.12+
+*   **Управление пакетами:** `uv`
+*   **База данных:** SQLite + SQLAlchemy 2.0 (Асинхронно)
+*   **Дашборд:** Streamlit + Plotly Express
+*   **Генерация графики:** Pillow (PIL)
+*   **Бот:** Aiogram 3.x
+*   **Парсинг:** `asyncio` и `httpx` (с фильтрацией ритейл-мусора)

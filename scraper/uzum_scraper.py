@@ -143,13 +143,28 @@ async def scrape_uzum() -> tuple[int, int, int]:
     results = []
 
     # Process vendors
-    RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart", "baraka", "барака"}
+    RETAIL_TRASH = {
+        "makro",
+        "zoo planeta",
+        "korzinka go",
+        "the loaf",
+        "korzinka",
+        "apteka",
+        "pharmacy",
+        "texnomart",
+        "baraka",
+        "барака",
+    }
 
     for idx, vendor_data in enumerate(vendors):
         info = vendor_data.get("info", {})
         vendor_id = info.get("id")
         title = info.get("name", vendor_data.get("title", "Unknown"))
-        
+        alias = info.get("alias") or info.get("slug")
+        restaurant_url = (
+            f"https://www.uzumtezkor.uz/ru/restaurant/{alias}" if alias else None
+        )
+
         # Skip retail trash to avoid data pollution
         if any(trash in title.lower() for trash in RETAIL_TRASH):
             print(f"[Uzum Tezkor] Skipping retail/trash: {title}")
@@ -165,15 +180,19 @@ async def scrape_uzum() -> tuple[int, int, int]:
             rating = float(raw_rating)
 
         # Вытаскиваем отзывы (если API их прячет, ставим 50, чтобы пузырек на графике не исчезал)
-        reviews = info.get("reviewsCount", info.get("feedbacksCount", vendor_data.get("reviews", 50)))
+        reviews = info.get(
+            "reviewsCount", info.get("feedbacksCount", vendor_data.get("reviews", 50))
+        )
 
         # Извлекаем доставку (проверяем разные ключи словаря, так как API может их менять)
         delivery_dict = vendor_data.get("delivery", vendor_data.get("deliveryInfo", {}))
-        
+
         # Безопасное извлечение цены доставки
         raw_delivery_price = delivery_dict.get("price", delivery_dict.get("cost", 0))
-        delivery_fee = float(raw_delivery_price) if raw_delivery_price is not None else 0.0
-        
+        delivery_fee = (
+            float(raw_delivery_price) if raw_delivery_price is not None else 0.0
+        )
+
         # Ищем порог бесплатной доставки в условиях
         free_delivery_threshold = None
         conditions = delivery_dict.get("conditions", [])
@@ -226,6 +245,7 @@ async def scrape_uzum() -> tuple[int, int, int]:
         results.append(
             {
                 "name": title.strip().title(),
+                "restaurant_url": restaurant_url,
                 "position": idx + 1,
                 "rating": rating,
                 "reviews": reviews,
@@ -355,7 +375,8 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
                         promo = ParsedPromo(
                             timestamp=now,
                             aggregator_name="Uzum Tezkor",
-                            competitor_name=rest_name,
+                            restaurant_url=data.get("restaurant_url"),
+                            competitor_name=data["name"],
                             item_category=mapped_category,
                             item_name=item["name"],
                             base_price=old_price,
@@ -363,7 +384,9 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
                             discount_percent=discount,
                             promo_type=item.get("promo_type", "discount"),
                             promo_target="item_level",
-                            promo_condition=item.get("promo_condition", "Скидка от заведения"),
+                            promo_condition=item.get(
+                                "promo_condition", "Скидка от заведения"
+                            ),
                             position_in_list=data.get("position", 1),
                             is_in_carousel=False,
                             free_delivery_threshold=data["free_delivery_threshold"],
@@ -376,7 +399,7 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
                             delivery_time_max=45,
                             search_query_used="Feed",
                             rating_score=data["rating"],
-                            reviews_count=data["reviews"]
+                            reviews_count=data["reviews"],
                         )
                         parsed_promos.append(promo)
 

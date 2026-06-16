@@ -31,9 +31,7 @@ class AnomalyDetector:
             # Find options that are more expensive but have at least 20% MORE reviews
             more_expensive = group[group["final_price"] > cheapest["final_price"]]
             for _, premium in more_expensive.iterrows():
-                if premium["reviews_count"] > (
-                    cheapest["reviews_count"] * 1.2
-                ):
+                if premium["reviews_count"] > (cheapest["reviews_count"] * 1.2):
                     anomalies.append(
                         {
                             "Dish": dish,
@@ -45,10 +43,7 @@ class AnomalyDetector:
                             "Premium_Reviews": premium["reviews_count"],
                             "Price_Diff_%": round(
                                 (
-                                    (
-                                        premium["final_price"]
-                                        - cheapest["final_price"]
-                                    )
+                                    (premium["final_price"] - cheapest["final_price"])
                                     / cheapest["final_price"]
                                 )
                                 * 100,

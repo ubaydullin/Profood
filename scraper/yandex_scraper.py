@@ -61,8 +61,20 @@ async def async_scrape_yandex() -> list[dict]:
 
     # Расширенный фильтр мусора (включая кириллицу)
     RETAIL_TRASH = {
-        "makro", "макро", "zoo planeta", "зоо", "korzinka go", "korzinka", "корзинка",
-        "the loaf", "apteka", "аптека", "pharmacy", "texnomart", "baraka", "барака"
+        "makro",
+        "макро",
+        "zoo planeta",
+        "зоо",
+        "korzinka go",
+        "korzinka",
+        "корзинка",
+        "the loaf",
+        "apteka",
+        "аптека",
+        "pharmacy",
+        "texnomart",
+        "baraka",
+        "барака",
     }
 
     for idx, url in enumerate(links):
@@ -107,11 +119,13 @@ async def async_scrape_yandex() -> list[dict]:
 
             if "price" in delivery_data:
                 delivery_fee = float(delivery_data["price"].get("value", 0))
-            
+
             if "conditions" in delivery_data:
                 for cond in delivery_data["conditions"]:
                     if cond.get("deliveryCost", {}).get("value") == 0:
-                        free_delivery_threshold = float(cond.get("orderMinPrice", {}).get("value", 0))
+                        free_delivery_threshold = float(
+                            cond.get("orderMinPrice", {}).get("value", 0)
+                        )
             # ---------------------------------------------
 
             # Пропуск ритейла
@@ -134,6 +148,7 @@ async def async_scrape_yandex() -> list[dict]:
                 results.append(
                     {
                         "name": rest_name.strip().title(),
+                        "restaurant_url": url,
                         "position": idx + 1,
                         "rating": rating,
                         "reviews": reviews,
@@ -181,7 +196,7 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
     price_val = item.get("decimalPrice") or item.get("price") or 0
     try:
         price = float(price_val)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         price = 0
 
     if price <= 0:
@@ -203,7 +218,7 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
                 has_promo = True
                 original_price = price
                 current_price = promo_price
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
 
     # Mechanism 2: oldPrice (classic strikethrough discount)
@@ -216,7 +231,7 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
                     has_promo = True
                     original_price = old_price
                     current_price = price
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
 
     # Extract promo type from promoTypes array
@@ -274,7 +289,7 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
 async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
     promos_count = 0
     errors_count = 0
-    now = datetime.utcnow() # Исправлено: добавлено время парсинга
+    now = datetime.utcnow()  # Исправлено: добавлено время парсинга
 
     async with AsyncSessionLocal() as db:
         for data in results:
@@ -296,10 +311,11 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
                     else:
                         discount = 0.0
                         promo_type = "standard"
-                        
+
                     promo = ParsedPromo(
                         timestamp=now,
                         aggregator_name="Yandex Eda",
+                        restaurant_url=data.get("restaurant_url"),
                         competitor_name=data["name"],
                         item_category=item.get("category", "Other"),
                         item_name=item["name"],
@@ -308,7 +324,11 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
                         discount_percent=discount if has_promo else None,
                         promo_type=promo_type,
                         promo_target="item_level",
-                        promo_condition=item.get("promo_condition", "Скидка от заведения") if has_promo else None,
+                        promo_condition=item.get(
+                            "promo_condition", "Скидка от заведения"
+                        )
+                        if has_promo
+                        else None,
                         free_delivery_threshold=data["free_delivery_threshold"],
                         discount_threshold=None,
                         is_aggregator_funded=False,
@@ -321,10 +341,10 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
                         is_in_carousel=False,
                         search_query_used="Feed",
                         rating_score=data["rating"],
-                        reviews_count=data["reviews"]
+                        reviews_count=data["reviews"],
                     )
                     parsed_promos.append(promo)
-                
+
                 db.add_all(parsed_promos)
 
             except Exception as e:
@@ -334,6 +354,7 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
         await db.commit()
 
     return len(results), promos_count, errors_count
+
 
 async def scrape_yandex() -> tuple[int, int, int]:
     """Main entry point for the Yandex Eda scraper.
@@ -350,4 +371,4 @@ async def scrape_yandex() -> tuple[int, int, int]:
         return stats
     except Exception as e:
         print(f"[Yandex] Scrape failed: {e}")
-        return 0, 0, 1
+        return 0, 0, 1
