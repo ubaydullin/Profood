@@ -147,7 +147,7 @@ with tab1:
                 "current_price",
             ]
         ],
-        use_container_width=True,
+        width='stretch',
         hide_index=True,
     )
 
@@ -170,7 +170,7 @@ with tab2:
                         "original_price",
                     ]
                 ],
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         else:
@@ -189,7 +189,7 @@ with tab3:
         paper_bgcolor="rgba(0,0,0,0)",
         font_color="#E2E8F0",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
     st.markdown("<h3>Overall Market Shares</h3>", unsafe_allow_html=True)
     pie_fig = px.pie(df, names="platform", title="Platform Dominance by Promos")
@@ -198,7 +198,7 @@ with tab3:
         paper_bgcolor="rgba(0,0,0,0)",
         font_color="#E2E8F0",
     )
-    st.plotly_chart(pie_fig, use_container_width=True)
+    st.plotly_chart(pie_fig, width='stretch')
 
 with tab4:
     st.markdown("<h3>Brand Loyalty Anomalies</h3>", unsafe_allow_html=True)
@@ -211,6 +211,6 @@ with tab4:
     anomalies = detector.detect_premium_brand_anomalies()
 
     if not anomalies.empty:
-        st.dataframe(anomalies, use_container_width=True, hide_index=True)
+        st.dataframe(anomalies, width='stretch', hide_index=True)
     else:
         st.info("No anomalies detected currently.")
