@@ -1,199 +1,415 @@
-import asyncio
+"""Uzum Tezkor scraper.
+
+Uses native API requests to extract restaurant menu data with pricing.
+Bypasses anti-bot by extracting accessToken from the initial page payload
+and using curl_cffi via AsyncAPIClient.
+
+API endpoints discovered:
+- /api/v1/vendors — list of restaurants at a geo location
+- /api/v1/vendors/{uuid}/catalog — individual restaurant data
+"""
+
+import sys
+
+if sys.stdout.encoding != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 import json
-import os
-from sqlalchemy.future import select
-from seleniumbase import SB
-from database.db import AsyncSessionLocal
-from database.models import Restaurant, Promotion, PriceSnapshot
-from analytics.category_mapper import map_restaurant_category, normalize_restaurant_name
+from datetime import datetime
 from bs4 import BeautifulSoup
 
-def sync_scrape_uzum():
-    print("[Uzum Tezkor] Starting UC Mode DOM scrape...")
-    results = []
-    
-    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.json')
+from sqlalchemy.future import select
+
+from analytics.category_mapper import map_restaurant_category, normalize_restaurant_name
+from database.db import AsyncSessionLocal
+from database.models import Promotion, PriceSnapshot, Restaurant
+from scraper.api_client import AsyncAPIClient
+from scraper.geo_rotator import get_random_point
+
+
+async def _get_uzum_token(client: AsyncAPIClient) -> str | None:
+    """Fetch the Uzum homepage and extract the accessToken from __NEXT_DATA__."""
+    print("[Uzum Tezkor] Fetching homepage to get auth token...")
+    resp = await client.client.get("https://www.uzumtezkor.uz/ru")
+    soup = BeautifulSoup(resp.text, "html.parser")
+    script = soup.find("script", id="__NEXT_DATA__")
+
+    if not script:
+        print("[Uzum Tezkor] ERROR: Could not find __NEXT_DATA__ script.")
+        return None
+
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
+        data = json.loads(script.string)
+        token = data.get("props", {}).get("pageProps", {}).get("accessToken")
+        if token:
+            print(f"[Uzum Tezkor] Successfully extracted token (len: {len(token)})")
+            return token
     except Exception as e:
-        print("[Uzum] Error loading config:", e)
-        return results
+        print(f"[Uzum Tezkor] ERROR: Failed to parse token: {e}")
 
-    with SB(uc=True, headless=True) as sb:
-        for comp in config.get("competitors", []):
-            url = comp.get("uzum_url")
-            rest_name = comp.get("name")
-            if not url:
-                continue
-                
-            print(f"[Uzum] Scraping {rest_name} at {url}...")
-            sb.uc_open_with_reconnect(url, 5)
-            sb.sleep(4)
-            
-            items = []
-            delivery_fee = 9000
-            free_delivery_threshold = 100000
-            rating = 4.5
-            reviews = 100
-            
-            try:
-                html = sb.get_page_source()
-                soup = BeautifulSoup(html, 'html.parser')
-                next_data = soup.find('script', id='__NEXT_DATA__')
-                
-                if next_data:
-                    data = json.loads(next_data.string)
-                    vendor = data.get('props', {}).get('pageProps', {}).get('vendor', {})
-                    rating = vendor.get('rating', 4.5)
-                    reviews = vendor.get('reviewCount', 100)
-                    
-                    categories = data.get('props', {}).get('pageProps', {}).get('menu', {}).get('categories', [])
-                    for cat in categories:
-                        for item in cat.get('items', []):
-                            name = item.get('name', '')
-                            price = item.get('price', 0)
-                            old_price = item.get('oldPrice') or 0
-                            
-                            if price > 0:
-                                items.append({"name": name, "price": price, "old_price": old_price})
-                else:
-                    print(f"[Uzum] Warning: __NEXT_DATA__ not found for {rest_name}, trying DOM fallback")
-                    
-                # DOM Fallback
-                if not items:
-                    for _ in range(5):
-                        sb.execute_script("window.scrollBy(0, 1000);")
-                        sb.sleep(1)
-                    
-                    menu_items = sb.find_elements('div[class*="product-card"], a[href*="/product/"]')
-                    for item in menu_items:
-                        try:
-                            name = item.find_element("css selector", "h3, p[class*='title']").text
-                            price_text = item.find_element("css selector", "[class*='price']").text
-                            price = float(''.join(filter(str.isdigit, price_text)))
-                            old_price = price
-                            try:
-                                old_price_text = item.find_element("css selector", "del").text
-                                old_price = float(''.join(filter(str.isdigit, old_price_text)))
-                            except:
-                                pass
-                            if price > 0:
-                                items.append({"name": name, "price": price, "old_price": old_price})
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"[Uzum] Error extracting JSON for {rest_name}: {e}")
+    return None
 
-            if not items:
-                print(f"[Uzum] No items found for {rest_name}, skipping.")
-                # Fallback to test data if empty to keep DB populated for demo
-                items = [
-                    {"name": f"Классический {rest_name}", "price": 40000, "old_price": 46000},
-                    {"name": "Наггетсы", "price": 18000, "old_price": 22000}
-                ]
 
-            results.append({
-                "name": rest_name,
+async def _fetch_all_vendors(
+    client: AsyncAPIClient, lat: float, lon: float
+) -> list[dict]:
+    """Fetch all vendors at the given coordinates."""
+    vendors = []
+    limit = 100
+    offset = 0
+    total = None
+
+    while True:
+        params = {"lat": lat, "long": lon, "limit": limit, "offset": offset}
+        res = await client.get("/api/v1/vendors", params=params)
+        if not res or "vendors" not in res:
+            break
+
+        batch = res.get("vendors", [])
+        if not batch:
+            break
+
+        vendors.extend(batch)
+        if total is None:
+            total = res.get("total", len(batch))
+            print(f"[Uzum Tezkor] Found {total} vendors at location.")
+
+        offset += limit
+        if offset >= total or len(batch) < limit:
+            break
+
+    return vendors
+
+
+async def _fetch_vendor_catalog(
+    client: AsyncAPIClient, vendor_id: str, lat: float, lon: float
+) -> dict | None:
+    """Fetch catalog for a specific vendor."""
+    params = {"lat": lat, "long": lon}
+    # Multiple endpoints might exist depending on app version
+    endpoints = [
+        f"/api/v1/vendors/{vendor_id}/catalog",
+        f"/api/v2/vendors/{vendor_id}/catalog",
+    ]
+
+    for ep in endpoints:
+        res = await client.get(ep, params=params)
+        if res and "categories" in res:
+            return res
+
+    return None
+
+
+async def scrape_uzum() -> tuple[int, int, int]:
+    """Main entry point for the Uzum Tezkor scraper.
+
+    Uses native API requests to fetch all vendors and their catalogs.
+
+    Returns:
+        Tuple of (restaurants_count, promos_count, errors_count).
+    """
+    print("[Uzum Tezkor] Starting native API scrape...")
+
+    # Initialize basic client to get token
+    base_client = AsyncAPIClient(base_url="https://www.uzumtezkor.uz")
+    token = await _get_uzum_token(base_client)
+    await base_client.close()
+
+    if not token:
+        return 0, 0, 1
+
+    # Re-initialize client with token
+    client = AsyncAPIClient(
+        base_url="https://www.uzumtezkor.uz",
+        custom_headers={
+            "Authorization": f"Bearer {token}",
+            "x-platform": "8",
+            "x-platform-version": "1.104.20",
+        },
+    )
+
+    geo = get_random_point()
+    print(
+        f"[Uzum Tezkor] Using geo point: {geo['name']} ({geo['latitude']:.4f}, {geo['longitude']:.4f})"
+    )
+
+    vendors = await _fetch_all_vendors(client, geo["latitude"], geo["longitude"])
+    if not vendors:
+        print("[Uzum Tezkor] No vendors found.")
+        await client.close()
+        return 0, 0, 0
+
+    print(f"[Uzum Tezkor] Loaded {len(vendors)} vendors from API.")
+
+    results = []
+
+    # Process vendors
+    for idx, vendor_data in enumerate(vendors):
+        info = vendor_data.get("info", {})
+        vendor_id = info.get("id")
+        title = info.get("name", "Unknown")
+        # Extract rating
+        raw_rating = info.get("rating")
+        rating = 4.5
+        if isinstance(raw_rating, dict):
+            rating = float(raw_rating.get("gradeFloat", raw_rating.get("grade", 4.5)))
+        elif isinstance(raw_rating, (int, float)):
+            rating = float(raw_rating)
+        elif isinstance(raw_rating, str) and raw_rating.replace(".", "", 1).isdigit():
+            rating = float(raw_rating)
+
+        # Some fields might be in 'offer' or 'deliveryInfo'
+        delivery_fee = 15000  # fallback
+        min_order = 0
+        free_delivery_threshold = 100000
+
+        # Check delivery info
+        delivery_info = vendor_data.get("deliveryInfo", {})
+        if "price" in delivery_info:
+            delivery_fee = delivery_info.get("price")
+
+        if not vendor_id:
+            continue
+
+        print(
+            f"[Uzum Tezkor] ({idx + 1}/{len(vendors)}) Fetching catalog for {title}..."
+        )
+        catalog = await _fetch_vendor_catalog(
+            client, vendor_id, geo["latitude"], geo["longitude"]
+        )
+
+        if not catalog:
+            print(f"[Uzum Tezkor] Could not fetch catalog for {title}")
+            continue
+
+        items = []
+        for cat in catalog.get("categories", []):
+            for item in cat.get("items", []):
+                parsed = _parse_uzum_item(item)
+                if parsed:
+                    items.append(parsed)
+
+        # In newer API versions, products might be separate and referenced by ID
+        # Wait, the catalog API might return products differently!
+        if not items and "products" in catalog:
+            for item in catalog.get("products", []):
+                parsed = _parse_uzum_item(item)
+                if parsed:
+                    items.append(parsed)
+
+        if not items:
+            print(f"[Uzum Tezkor] No items found for {title}")
+            continue
+
+        promo_count = sum(1 for it in items if it["has_promo"])
+        print(
+            f"[Uzum Tezkor] Scraped {title}: {len(items)} items, {promo_count} promos"
+        )
+
+        results.append(
+            {
+                "name": title,
                 "rating": rating,
-                "reviews": reviews,
+                "reviews": 0,  # Info might not contain review count
                 "delivery_fee": delivery_fee,
-                "min_order": 0,
+                "min_order": min_order,
                 "free_delivery_threshold": free_delivery_threshold,
-                "items": items
-            })
-            
-    return results
+                "items": items,
+            }
+        )
 
-async def process_uzum_results(results):
+    await client.close()
+
+    if not results:
+        return 0, 0, 1
+
+    stats = await process_uzum_results(results)
+    print("[Uzum] Completed scrape.")
+    return stats
+
+
+def _parse_uzum_item(item: dict) -> dict | None:
+    """Parse a single Uzum Tezkor menu item.
+
+    Args:
+        item: Raw item dict from the Uzum API.
+
+    Returns:
+        Parsed item dict, or None if invalid.
+    """
+    name = item.get("name") or item.get("title")
+    if not name:
+        return None
+
+    # Handle native API prices format
+    price_obj = item.get("price")
+    old_price_obj = item.get("oldPrice")
+
+    price = 0
+    old_price = 0
+
+    if isinstance(price_obj, dict):
+        price = price_obj.get("value", 0) / 100.0
+    elif isinstance(price_obj, (int, float)):
+        price = float(price_obj)
+
+    if isinstance(old_price_obj, dict):
+        old_price = old_price_obj.get("value", 0) / 100.0
+    elif isinstance(old_price_obj, (int, float)):
+        old_price = float(old_price_obj)
+    elif old_price_obj is None:
+        old_price = price
+
+    if price <= 0:
+        # Try prices array fallback
+        prices = item.get("prices", [])
+        if prices:
+            sorted_prices = sorted(
+                prices, key=lambda x: x.get("sum", x.get("price", 0))
+            )
+            price = sorted_prices[0].get("sum", sorted_prices[0].get("price", 0))
+            if isinstance(price, dict):
+                price = price.get("value", 0) / 100.0
+            old_price_raw = sorted_prices[-1].get(
+                "sum", sorted_prices[-1].get("oldPrice", price)
+            )
+            if isinstance(old_price_raw, dict):
+                old_price = old_price_raw.get("value", 0) / 100.0
+            else:
+                old_price = old_price_raw
+    if price <= 0:
+        return None
+
+    has_promo = old_price > price
+    promo_type = "discount" if has_promo else "standard"
+    promo_condition = ""
+
+    # Check for additional promo indicators
+    if item.get("badges"):
+        badge_texts = []
+        for badge in item["badges"]:
+            if isinstance(badge, dict):
+                badge_text = badge.get("text", badge.get("title", ""))
+                if badge_text:
+                    badge_texts.append(str(badge_text))
+        if badge_texts:
+            promo_condition = " | ".join(badge_texts)
+
+    if item.get("promos") or item.get("promotions") or item.get("discount"):
+        has_promo = True
+        promo_type = "discount"
+        if not promo_condition:
+            promo_condition = "Акция"
+
+    return {
+        "name": name,
+        "price": float(price),
+        "old_price": float(old_price),
+        "has_promo": has_promo,
+        "promo_type": promo_type,
+        "promo_condition": promo_condition,
+    }
+
+
+async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
+    """Save parsed Uzum Tezkor results to the database."""
     promos_count = 0
     errors_count = 0
+
     async with AsyncSessionLocal() as db:
         for data in results:
-            raw_name = data["name"]
-            rest_name = normalize_restaurant_name(raw_name)
-            mapped_category = map_restaurant_category(rest_name) or "Бургеры"
-            
-            stmt = select(Restaurant).where(Restaurant.name == rest_name, Restaurant.platform == 'Uzum Tezkor')
-            result = await db.execute(stmt)
-            restaurant = result.scalar_one_or_none()
-            
-            if not restaurant:
-                restaurant = Restaurant(
-                    platform='Uzum Tezkor',
-                    name=rest_name,
-                    category=mapped_category,
-                    rating_score=data["rating"],
-                    reviews_count=data["reviews"],
-                    delivery_fee=data["delivery_fee"],
-                    service_fee=1000,
-                    min_order_value=data["min_order"],
-                    delivery_time_min=20,
-                    delivery_time_max=40,
-                    free_delivery_threshold=data["free_delivery_threshold"],
-                    position_in_list=1,
-                    is_in_carousel=False,
-                    search_query_used="Feed"
-                )
-                db.add(restaurant)
-                await db.flush()
-            else:
-                restaurant.delivery_fee = data["delivery_fee"]
-                restaurant.free_delivery_threshold = data["free_delivery_threshold"]
-                await db.flush()
-                
-            for item in data["items"]:
-                price = item["price"]
-                old_price = item["old_price"]
-                
-                # Add Price Snapshot for Historicity
-                snapshot = PriceSnapshot(
-                    restaurant_id=restaurant.id,
-                    item_name=item["name"],
-                    price=price,
-                    old_price=old_price if old_price > price else None,
-                    is_discounted=True if old_price > price else False
-                )
-                db.add(snapshot)
-                
-                if old_price > price > 0:
-                    promos_count += 1
-                    discount = round(((old_price - price) / old_price) * 100, 1)
-                    promo_stmt = select(Promotion).where(Promotion.restaurant_id == restaurant.id, Promotion.title == item["name"])
-                    promo_result = await db.execute(promo_stmt)
-                    promo = promo_result.scalar_one_or_none()
-                    
-                    if not promo:
-                        new_promo = Promotion(
-                            restaurant_id=restaurant.id,
-                            title=item["name"],
-                            description="",
-                            original_price=old_price,
-                            current_price=price,
-                            discount_percent=discount,
-                            promo_type="discount",
-                            promo_target="item_level",
-                            promo_condition="Скидка от заведения",
-                            discount_threshold=None,
-                            is_aggregator_funded=False,
-                            is_active=True
-                        )
-                        db.add(new_promo)
-                    else:
-                        promo.current_price = price
-                        promo.original_price = old_price
-                        promo.discount_percent = discount
-                        promo.is_active = True
-                        
-        await db.commit()
-    return len(results), promos_count, errors_count
+            try:
+                raw_name = data["name"]
+                rest_name = normalize_restaurant_name(raw_name)
+                mapped_category = map_restaurant_category(rest_name) or "Other"
 
-async def scrape_uzum():
-    try:
-        results = await asyncio.to_thread(sync_scrape_uzum)
-        stats = await process_uzum_results(results)
-        print("[Uzum] Completed scrape.")
-        return stats
-    except Exception as e:
-        print(f"[Uzum] Scrape failed: {e}")
-        return 0, 0, 1
+                stmt = select(Restaurant).where(
+                    Restaurant.name == rest_name,
+                    Restaurant.platform == "Uzum Tezkor",
+                )
+                result = await db.execute(stmt)
+                restaurant = result.scalar_one_or_none()
+
+                if not restaurant:
+                    restaurant = Restaurant(
+                        platform="Uzum Tezkor",
+                        name=rest_name,
+                        category=mapped_category,
+                        rating_score=data["rating"],
+                        reviews_count=data["reviews"],
+                        delivery_fee=data["delivery_fee"],
+                        service_fee=1000,
+                        min_order_value=data["min_order"],
+                        delivery_time_min=20,
+                        delivery_time_max=45,
+                        free_delivery_threshold=data["free_delivery_threshold"],
+                        position_in_list=1,
+                        is_in_carousel=False,
+                        search_query_used="Feed",
+                    )
+                    db.add(restaurant)
+                    await db.flush()
+                else:
+                    restaurant.delivery_fee = data["delivery_fee"]
+                    restaurant.free_delivery_threshold = data["free_delivery_threshold"]
+                    await db.flush()
+
+                for item in data["items"]:
+                    price = item["price"]
+                    old_price = item["old_price"]
+                    has_promo = item["has_promo"]
+
+                    # Always save price snapshot for history tracking
+                    snapshot = PriceSnapshot(
+                        restaurant_id=restaurant.id,
+                        item_name=item["name"],
+                        price=price,
+                        old_price=old_price if old_price > price else None,
+                        is_discounted=has_promo,
+                    )
+                    db.add(snapshot)
+
+                    if has_promo and old_price > price > 0:
+                        promos_count += 1
+                        discount = round(((old_price - price) / old_price) * 100, 1)
+
+                        promo_stmt = select(Promotion).where(
+                            Promotion.restaurant_id == restaurant.id,
+                            Promotion.title == item["name"],
+                        )
+                        promo_result = await db.execute(promo_stmt)
+                        promo = promo_result.scalar_one_or_none()
+
+                        if not promo:
+                            new_promo = Promotion(
+                                restaurant_id=restaurant.id,
+                                title=item["name"],
+                                description="",
+                                original_price=old_price,
+                                current_price=price,
+                                discount_percent=discount,
+                                promo_type=item.get("promo_type", "discount"),
+                                promo_target="item_level",
+                                promo_condition=item.get(
+                                    "promo_condition",
+                                    "Скидка от заведения",
+                                ),
+                                discount_threshold=None,
+                                is_aggregator_funded=False,
+                                is_active=True,
+                            )
+                            db.add(new_promo)
+                        else:
+                            promo.current_price = price
+                            promo.original_price = old_price
+                            promo.discount_percent = discount
+                            promo.is_active = True
+                            promo.last_seen_at = datetime.utcnow()
+
+            except Exception as e:
+                errors_count += 1
+                print(f"[Uzum Tezkor] DB error for {data.get('name', '?')}: {e}")
+
+        await db.commit()
+
+    return len(results), promos_count, errors_count

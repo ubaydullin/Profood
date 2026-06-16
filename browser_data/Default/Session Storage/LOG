@@ -1,0 +1,9 @@
+2026/06/15-13:30:15.835 5654 Reusing MANIFEST D:\Profood_IT\saleScrap\browser_data\Default\Session Storage/MANIFEST-000001
+2026/06/15-13:30:15.844 5654 Recovering log #256
+2026/06/15-13:30:15.845 5654 Level-0 table #259: started
+2026/06/15-13:30:15.853 5654 Level-0 table #259: 17228 bytes OK
+2026/06/15-13:30:15.867 5654 Delete type=0 #256
+2026/06/15-13:30:15.868 5658 Compacting 4@0 + 1@1 files
+2026/06/15-13:30:15.885 5658 Generated table #261@0: 327 keys, 201944 bytes
+2026/06/15-13:30:15.885 5658 Compacted 4@0 + 1@1 files => 201944 bytes
+2026/06/15-13:30:15.886 5658 compacted to: files[ 0 1 1 0 0 0 0 ]
