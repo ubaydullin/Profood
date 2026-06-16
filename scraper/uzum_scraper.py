@@ -146,15 +146,14 @@ async def scrape_uzum() -> tuple[int, int, int]:
     RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart"}
 
     for idx, vendor_data in enumerate(vendors):
-        title = vendor_data.get("title", "Unknown")
+        info = vendor_data.get("info", {})
+        vendor_id = info.get("id")
+        title = info.get("name", vendor_data.get("title", "Unknown"))
         
         # Skip retail trash to avoid data pollution
         if any(trash in title.lower() for trash in RETAIL_TRASH):
             print(f"[Uzum Tezkor] Skipping retail/trash: {title}")
             continue
-        info = vendor_data.get("info", {})
-        vendor_id = info.get("id")
-        title = info.get("name", "Unknown")
         # Extract rating
         raw_rating = info.get("rating")
         rating = 4.5
