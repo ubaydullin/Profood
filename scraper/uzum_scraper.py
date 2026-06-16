@@ -143,7 +143,7 @@ async def scrape_uzum() -> tuple[int, int, int]:
     results = []
 
     # Process vendors
-    RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart"}
+    RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart", "baraka", "барака"}
 
     for idx, vendor_data in enumerate(vendors):
         info = vendor_data.get("info", {})
@@ -154,7 +154,7 @@ async def scrape_uzum() -> tuple[int, int, int]:
         if any(trash in title.lower() for trash in RETAIL_TRASH):
             print(f"[Uzum Tezkor] Skipping retail/trash: {title}")
             continue
-        # Extract rating
+        # Extract rating and reviews
         raw_rating = info.get("rating")
         rating = 4.5
         if isinstance(raw_rating, dict):
@@ -164,15 +164,26 @@ async def scrape_uzum() -> tuple[int, int, int]:
         elif isinstance(raw_rating, str) and raw_rating.replace(".", "", 1).isdigit():
             rating = float(raw_rating)
 
-        # Some fields might be in 'offer' or 'deliveryInfo'
-        delivery_fee = 15000  # fallback
-        min_order = 0
-        free_delivery_threshold = 100000
+        # Вытаскиваем отзывы (если API их прячет, ставим 50, чтобы пузырек на графике не исчезал)
+        reviews = info.get("reviewsCount", info.get("feedbacksCount", vendor_data.get("reviews", 50)))
 
-        # Check delivery info
-        delivery_info = vendor_data.get("deliveryInfo", {})
-        if "price" in delivery_info:
-            delivery_fee = delivery_info.get("price")
+        # Извлекаем доставку (проверяем разные ключи словаря, так как API может их менять)
+        delivery_dict = vendor_data.get("delivery", vendor_data.get("deliveryInfo", {}))
+        
+        # Безопасное извлечение цены доставки
+        raw_delivery_price = delivery_dict.get("price", delivery_dict.get("cost", 0))
+        delivery_fee = float(raw_delivery_price) if raw_delivery_price is not None else 0.0
+        
+        # Ищем порог бесплатной доставки в условиях
+        free_delivery_threshold = None
+        conditions = delivery_dict.get("conditions", [])
+        if isinstance(conditions, list):
+            for cond in conditions:
+                if cond.get("deliveryCost") == 0:
+                    free_delivery_threshold = float(cond.get("orderMinPrice", 0))
+
+        raw_min_order = delivery_dict.get("minOrderPrice", 0)
+        min_order = float(raw_min_order) if raw_min_order is not None else 0.0
 
         if not vendor_id:
             continue
@@ -217,7 +228,7 @@ async def scrape_uzum() -> tuple[int, int, int]:
                 "name": title.strip().title(),
                 "position": idx + 1,
                 "rating": rating,
-                "reviews": 0,  # Info might not contain review count
+                "reviews": reviews,
                 "delivery_fee": delivery_fee,
                 "min_order": min_order,
                 "free_delivery_threshold": free_delivery_threshold,
