@@ -143,13 +143,28 @@ async def scrape_uzum() -> tuple[int, int, int]:
     results = []
 
     # Process vendors
-    RETAIL_TRASH = {"makro", "zoo planeta", "korzinka go", "the loaf", "korzinka", "apteka", "pharmacy", "texnomart", "baraka", "барака"}
+    RETAIL_TRASH = {
+        "makro",
+        "zoo planeta",
+        "korzinka go",
+        "the loaf",
+        "korzinka",
+        "apteka",
+        "pharmacy",
+        "texnomart",
+        "baraka",
+        "барака",
+    }
 
     for idx, vendor_data in enumerate(vendors):
         info = vendor_data.get("info", {})
         vendor_id = info.get("id")
         title = info.get("name", vendor_data.get("title", "Unknown"))
-        
+        alias = info.get("alias") or info.get("slug")
+        restaurant_url = (
+            f"https://www.uzumtezkor.uz/ru/restaurant/{alias}" if alias else None
+        )
+
         # Skip retail trash to avoid data pollution
         if any(trash in title.lower() for trash in RETAIL_TRASH):
             print(f"[Uzum Tezkor] Skipping retail/trash: {title}")
@@ -165,25 +180,47 @@ async def scrape_uzum() -> tuple[int, int, int]:
             rating = float(raw_rating)
 
         # Вытаскиваем отзывы (если API их прячет, ставим 50, чтобы пузырек на графике не исчезал)
-        reviews = info.get("reviewsCount", info.get("feedbacksCount", vendor_data.get("reviews", 50)))
+        reviews = info.get(
+            "reviewsCount", info.get("feedbacksCount", vendor_data.get("reviews", 50))
+        )
 
-        # Извлекаем доставку (проверяем разные ключи словаря, так как API может их менять)
-        delivery_dict = vendor_data.get("delivery", vendor_data.get("deliveryInfo", {}))
-        
-        # Безопасное извлечение цены доставки
-        raw_delivery_price = delivery_dict.get("price", delivery_dict.get("cost", 0))
-        delivery_fee = float(raw_delivery_price) if raw_delivery_price is not None else 0.0
-        
-        # Ищем порог бесплатной доставки в условиях
+        # Извлекаем доставку из реальной структуры API:
+        # - receiving.delivery.price.value — фактическая стоимость доставки
+        # - offer.deliveryAmount — стоимость до применения скидки
+        # - offer.minOrderAmount — минимальная сумма заказа
+        # - offer.minDeliveryTime / maxDeliveryTime — время доставки
+        receiving = vendor_data.get("receiving", {})
+        receiving_delivery = receiving.get("delivery", {})
+        receiving_price = receiving_delivery.get("price", {})
+
+        offer = vendor_data.get("offer", {})
+
+        # Стоимость доставки: берём фактическую (value), если есть,
+        # иначе — originalValue из receiving, иначе — deliveryAmount из offer.
+        raw_delivery = receiving_price.get("value")
+        if raw_delivery is None:
+            raw_delivery = receiving_price.get("originalValue")
+        if raw_delivery is None:
+            raw_delivery = offer.get("deliveryAmount", 0)
+        # Цены в API приходят в тиинах (×100), конвертируем в сумы
+        delivery_fee = float(raw_delivery) / 100.0 if raw_delivery else 0.0
+
+        # Порог бесплатной доставки: если receiving показывает value=0,
+        # а originalValue > 0, значит доставка бесплатная при текущих условиях
         free_delivery_threshold = None
-        conditions = delivery_dict.get("conditions", [])
-        if isinstance(conditions, list):
-            for cond in conditions:
-                if cond.get("deliveryCost") == 0:
-                    free_delivery_threshold = float(cond.get("orderMinPrice", 0))
+        if receiving_price.get("value") == 0 and receiving_price.get("originalValue", 0) > 0:
+            # Минимальный заказ может быть порогом
+            raw_min = offer.get("minOrderAmount", 0)
+            if raw_min:
+                free_delivery_threshold = float(raw_min) / 100.0
 
-        raw_min_order = delivery_dict.get("minOrderPrice", 0)
-        min_order = float(raw_min_order) if raw_min_order is not None else 0.0
+        # Минимальный заказ
+        raw_min_order = offer.get("minOrderAmount", 0)
+        min_order = float(raw_min_order) / 100.0 if raw_min_order else 0.0
+
+        # Реальное время доставки из API (без хардкода)
+        delivery_time_min = offer.get("minDeliveryTime")
+        delivery_time_max = offer.get("maxDeliveryTime")
 
         if not vendor_id:
             continue
@@ -200,19 +237,18 @@ async def scrape_uzum() -> tuple[int, int, int]:
             continue
 
         items = []
+        # Парсим товары из categories.items (старый формат)
         for cat in catalog.get("categories", []):
             for item in cat.get("items", []):
                 parsed = _parse_uzum_item(item)
                 if parsed:
                     items.append(parsed)
 
-        # In newer API versions, products might be separate and referenced by ID
-        # Wait, the catalog API might return products differently!
-        if not items and "products" in catalog:
-            for item in catalog.get("products", []):
-                parsed = _parse_uzum_item(item)
-                if parsed:
-                    items.append(parsed)
+        # В новом формате API товары лежат в отдельном списке 'products'
+        for item in catalog.get("products", []):
+            parsed = _parse_uzum_item(item)
+            if parsed:
+                items.append(parsed)
 
         if not items:
             print(f"[Uzum Tezkor] No items found for {title}")
@@ -226,12 +262,15 @@ async def scrape_uzum() -> tuple[int, int, int]:
         results.append(
             {
                 "name": title.strip().title(),
+                "restaurant_url": restaurant_url,
                 "position": idx + 1,
                 "rating": rating,
                 "reviews": reviews,
                 "delivery_fee": delivery_fee,
                 "min_order": min_order,
                 "free_delivery_threshold": free_delivery_threshold,
+                "delivery_time_min": delivery_time_min,
+                "delivery_time_max": delivery_time_max,
                 "items": items,
             }
         )
@@ -319,6 +358,24 @@ def _parse_uzum_item(item: dict) -> dict | None:
         if not promo_condition:
             promo_condition = "Акция"
 
+    # Извлечение картинки: новый API использует 'images' (массив),
+    # старый — 'picture' (dict с uri/url)
+    picture_url = None
+    images_list = item.get("images")
+    if isinstance(images_list, list) and images_list:
+        # Новый формат: [{"default": "https://cdn.uzumtezkor.uz/..."}]
+        picture_url = images_list[0].get("default") or images_list[0].get("url")
+
+    if not picture_url:
+        # Фоллбэк на старый формат
+        picture_obj = item.get("picture") or item.get("image") or item.get("photo")
+        if isinstance(picture_obj, dict):
+            picture_url = picture_obj.get("uri") or picture_obj.get("url")
+        elif isinstance(picture_obj, str):
+            picture_url = picture_obj
+        else:
+            picture_url = item.get("imageUrl")
+
     return {
         "name": name,
         "price": float(price),
@@ -326,6 +383,7 @@ def _parse_uzum_item(item: dict) -> dict | None:
         "has_promo": has_promo,
         "promo_type": promo_type,
         "promo_condition": promo_condition,
+        "picture_url": picture_url,
     }
 
 
@@ -355,7 +413,9 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
                         promo = ParsedPromo(
                             timestamp=now,
                             aggregator_name="Uzum Tezkor",
-                            competitor_name=rest_name,
+                            restaurant_url=data.get("restaurant_url"),
+                            competitor_name=data["name"],
+                            picture_url=item.get("picture_url"),
                             item_category=mapped_category,
                             item_name=item["name"],
                             base_price=old_price,
@@ -363,20 +423,22 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
                             discount_percent=discount,
                             promo_type=item.get("promo_type", "discount"),
                             promo_target="item_level",
-                            promo_condition=item.get("promo_condition", "Скидка от заведения"),
+                            promo_condition=item.get(
+                                "promo_condition", "Скидка от заведения"
+                            ),
                             position_in_list=data.get("position", 1),
                             is_in_carousel=False,
                             free_delivery_threshold=data["free_delivery_threshold"],
                             discount_threshold=None,
                             is_aggregator_funded=False,
                             delivery_fee=data["delivery_fee"],
-                            service_fee=1000,
+                            service_fee=None,
                             min_order_value=data["min_order"],
-                            delivery_time_min=20,
-                            delivery_time_max=45,
+                            delivery_time_min=data.get("delivery_time_min"),
+                            delivery_time_max=data.get("delivery_time_max"),
                             search_query_used="Feed",
                             rating_score=data["rating"],
-                            reviews_count=data["reviews"]
+                            reviews_count=data["reviews"],
                         )
                         parsed_promos.append(promo)
 

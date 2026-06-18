@@ -6,11 +6,13 @@ from sqlalchemy.orm import declarative_base, Mapped, mapped_column
 
 Base = declarative_base()
 
+
 class ParsedPromo(Base):
     """
     Единая плоская таблица для хранения результатов парсинга агрегаторов доставки еды,
     содержащая всю информацию о заведении, конкретном товаре и условиях акции.
     """
+
     __tablename__ = "parsed_promos"
 
     # БЛОК 1: Идентификация и Время
@@ -18,6 +20,8 @@ class ParsedPromo(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     aggregator_name: Mapped[str] = mapped_column(String, index=True)
     competitor_name: Mapped[str] = mapped_column(String, index=True)
+    restaurant_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    picture_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # БЛОК 2: Товар и Ценообразование
     item_category: Mapped[str] = mapped_column(String, default="Uncategorized")
@@ -29,7 +33,9 @@ class ParsedPromo(Base):
     # БЛОК 3: Условия Акций (Promo Constraints)
     promo_type: Mapped[str] = mapped_column(String, default="standard")
     promo_target: Mapped[str] = mapped_column(String, default="item_level")
-    free_delivery_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    free_delivery_threshold: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
     discount_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     promo_condition: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     is_aggregator_funded: Mapped[bool] = mapped_column(Boolean, default=False)

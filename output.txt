@@ -1,0 +1,45 @@
+--- Top Items in 'Other' Category ---
+                                      item_name competitor_name
+0                       (Акция) Сет Yoko 22 шт.      Yaponamama
+1                           (Акция) Сет Детройт      Yaponamama
+2                             (Акция) Сет Жигар      Yaponamama
+3                   (Акция) Сет Запеченный мини      Yaponamama
+4                                 Комбо Aylanay         Feed Up
+5                                Комбо Baquvvat         Feed Up
+6                             Комбо Bir shingil         Feed Up
+7                                 Комбо Juftlik         Feed Up
+8                                  Комбо Kamtar         Feed Up
+9                                 Комбо Klassik         Feed Up
+10                                Комбо Kreativ         Feed Up
+11                            Комбо Ta’bi nozik         Feed Up
+12                                    Комбо Top         Feed Up
+13                                Комбо Toyimli         Feed Up
+14                         (Акция) Плов куриный       Beshqozon
+15                      (Акция) Сет Комплексный       Beshqozon
+16         (Акция) Сет Комплексный на 3 персоны       Beshqozon
+17     (Акция) Сет Улфатлар с пловом девзира №1       Beshqozon
+18     (Акция) Сет Улфатлар с пловом девзира №2       Beshqozon
+19       (Акция) Сет Улфатлар с пловом зигир №1       Beshqozon
+20       (Акция) Сет Улфатлар с пловом зигир №2       Beshqozon
+21     (Акция) Сет Улфатлар с пловом куриным №1       Beshqozon
+22     (Акция) Сет Улфатлар с пловом куриным №2       Beshqozon
+23      (Акция) Сет Улфатлар с пловом особым №1       Beshqozon
+24      (Акция) Сет Улфатлар с пловом особым №2       Beshqozon
+25   (Акция) Сет Улфатлар с пловом свадебным №1       Beshqozon
+26   (Акция) Сет Улфатлар с пловом свадебным №2       Beshqozon
+27  (Акция) Сет Улфатлар с пловом чайханским №1       Beshqozon
+28  (Акция) Сет Улфатлар с пловом чайханским №2       Beshqozon
+29                                   Комбо Oila     Papa John'S
+
+--- Top Categories Overall ---
+      item_category     c
+0            Салаты  3873
+1     Горячие блюда  2907
+2  Холодные напитки  2376
+3           Напитки  2292
+4             Other  1916
+5           Десерты  1809
+6              Супы  1521
+7           Закуски  1368
+8             Акции   987
+9              Сеты   966
