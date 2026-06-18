@@ -6,9 +6,14 @@ from database.db import AsyncSessionLocal
 from database.models import ParsedPromo
 from sqlalchemy import select, func, desc
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
-from notifications.image_generator import generate_promo_image
+from aiogram.filters.callback_data import CallbackData
+from notifications.image_generator import generate_item_card
 
 load_dotenv()
+
+class SearchCallback(CallbackData, prefix="search"):
+    query: str
+    page: int
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
 ADMIN_CHAT_ID = os.getenv("TELEGRAM_ADMIN_CHAT_ID", "123456789")
@@ -51,33 +56,38 @@ async def cmd_top(message: types.Message):
                     ParsedPromo.discount_percent > 0,
                 )
                 .order_by(desc(ParsedPromo.discount_percent))
-                .limit(1)
+                .limit(5)
             )
             result = await db.execute(stmt)
-            promo = result.scalar()
+            promos = result.scalars().all()
 
-            if not promo:
+            if not promos:
                 await message.answer("Акций не найдено.")
                 return
 
-            img_io = generate_promo_image(
+            promo = promos[0]
+            img_io = await generate_item_card(
                 promo.competitor_name,
                 promo.item_name,
                 promo.base_price,
                 promo.promo_price,
                 promo.discount_percent,
+                promo.aggregator_name,
+                promo.picture_url
             )
             photo = BufferedInputFile(img_io.read(), filename="promo.png")
 
-            caption = (
-                f"🏆 <b>Топ скидка: {promo.competitor_name}</b>\n{promo.item_name}"
-            )
+            caption = "🏆 <b>Топ-5 лучших скидок:</b>\n\n"
+            for idx, p in enumerate(promos, 1):
+                caption += f"{idx}. {p.competitor_name} - {p.item_name} (-{p.discount_percent}%)\n"
 
             keyboard = []
-            if promo.restaurant_url:
-                keyboard.append(
-                    [InlineKeyboardButton(text="Открыть 🛒", url=promo.restaurant_url)]
-                )
+            for idx, p in enumerate(promos, 1):
+                if p.restaurant_url:
+                    keyboard.append(
+                        [InlineKeyboardButton(text=f"[{idx}] {p.competitor_name} 🛒", url=p.restaurant_url)]
+                    )
+            
             reply_markup = (
                 InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
             )
@@ -90,6 +100,22 @@ async def cmd_top(message: types.Message):
             )
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
+
+
+async def get_search_results(query: str, page: int):
+    async with AsyncSessionLocal() as db:
+        stmt = (
+            select(ParsedPromo)
+            .where(
+                ParsedPromo.promo_price.isnot(None),
+                func.lower(ParsedPromo.item_name).like(f"%{query}%"),
+            )
+            .group_by(ParsedPromo.competitor_name, ParsedPromo.item_name)
+            .order_by(desc(func.max(ParsedPromo.discount_percent)))
+            .limit(11).offset(page * 10)
+        )
+        result = await db.execute(stmt)
+        return result.scalars().all()
 
 
 @dp.message(Command("search"))
@@ -101,52 +127,102 @@ async def cmd_search(message: types.Message):
 
     query = args[1].lower()
     try:
-        async with AsyncSessionLocal() as db:
-            stmt = (
-                select(ParsedPromo)
-                .where(
-                    ParsedPromo.promo_price.isnot(None),
-                    func.lower(ParsedPromo.item_name).like(f"%{query}%"),
-                )
-                .order_by(desc(ParsedPromo.discount_percent))
-                .limit(1)
-            )
+        promos = await get_search_results(query, 0)
+        if not promos:
+            await message.answer(f"Акции по запросу '{query}' не найдены.")
+            return
 
-            result = await db.execute(stmt)
-            promo = result.scalar()
+        has_next = len(promos) > 10
+        display_promos = promos[:10]
 
-            if not promo:
-                await message.answer(f"Акции по запросу '{query}' не найдены.")
-                return
+        promo = display_promos[0]
+        img_io = await generate_item_card(
+            promo.competitor_name,
+            promo.item_name,
+            promo.base_price,
+            promo.promo_price,
+            promo.discount_percent,
+            promo.aggregator_name,
+            promo.picture_url
+        )
+        photo = BufferedInputFile(img_io.read(), filename="promo.png")
 
-            img_io = generate_promo_image(
-                promo.competitor_name,
-                promo.item_name,
-                promo.base_price,
-                promo.promo_price,
-                promo.discount_percent,
-            )
-            photo = BufferedInputFile(img_io.read(), filename="promo.png")
+        caption = f"🔍 <b>Лучшее совпадение по '{query}':</b>\n{promo.competitor_name} - {promo.item_name} (-{promo.discount_percent}%)\n"
+        
+        if len(display_promos) > 1:
+            caption += "\n📋 <b>Другие варианты (Стр. 1):</b>\n"
+            for idx, p in enumerate(display_promos[1:], 2):
+                caption += f"{idx}. {p.competitor_name} - {p.item_name} (-{p.discount_percent}%)\n"
 
-            caption = f"🔍 <b>Найдено по запросу '{query}':</b>\n{promo.competitor_name} - {promo.item_name}"
-
-            keyboard = []
-            if promo.restaurant_url:
+        keyboard = []
+        for idx, p in enumerate(display_promos, 1):
+            if p.restaurant_url:
                 keyboard.append(
-                    [InlineKeyboardButton(text="Открыть 🛒", url=promo.restaurant_url)]
+                    [InlineKeyboardButton(text=f"[{idx}] {p.competitor_name} 🛒", url=p.restaurant_url)]
                 )
-            reply_markup = (
-                InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
-            )
+                
+        nav_buttons = []
+        if has_next:
+            nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=SearchCallback(query=query[:20], page=1).pack()))
+        if nav_buttons:
+            keyboard.append(nav_buttons)
 
-            await message.answer_photo(
-                photo=photo,
-                caption=caption,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+
+        await message.answer_photo(
+            photo=photo,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
     except Exception as e:
         await message.answer(f"Ошибка: {e}")
+
+
+@dp.callback_query(SearchCallback.filter())
+async def process_search_page(callback: types.CallbackQuery, callback_data: SearchCallback):
+    query = callback_data.query
+    page = callback_data.page
+
+    try:
+        promos = await get_search_results(query, page)
+        
+        if not promos:
+            await callback.answer("Больше результатов нет", show_alert=True)
+            return
+
+        has_next = len(promos) > 10
+        display_promos = promos[:10]
+
+        caption = f"🔍 <b>Результаты по '{query}' (Стр. {page + 1}):</b>\n\n"
+        for idx, p in enumerate(display_promos, page * 10 + 1):
+            caption += f"{idx}. {p.competitor_name} - {p.item_name} (-{p.discount_percent}%)\n"
+
+        keyboard = []
+        for idx, p in enumerate(display_promos, page * 10 + 1):
+            if p.restaurant_url:
+                keyboard.append(
+                    [InlineKeyboardButton(text=f"[{idx}] {p.competitor_name} 🛒", url=p.restaurant_url)]
+                )
+        
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=SearchCallback(query=query[:20], page=page - 1).pack()))
+        if has_next:
+            nav_buttons.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=SearchCallback(query=query[:20], page=page + 1).pack()))
+        if nav_buttons:
+            keyboard.append(nav_buttons)
+
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+
+        await callback.message.edit_caption(
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+        await callback.answer()
+    except Exception as e:
+        await callback.answer(f"Ошибка загрузки страницы: {e}")
 
 
 async def send_telegram_alert(message: str):
@@ -164,7 +240,7 @@ async def send_telegram_alert(message: str):
 
 
 async def send_parsing_stats(
-    platform: str, status: str, rest_count: int, promo_count: int, error_count: int
+    platform: str, status: str, rest_count: int, promo_count: int, error_count: int, top_promo=None
 ):
     icon = "✅" if status == "completed" else "❌"
     from datetime import datetime
@@ -178,6 +254,34 @@ async def send_parsing_stats(
     msg += f"🏷 Найдено акций: {promo_count}\n"
     msg += f"⚠️ Ошибок: {error_count}\n\n"
     msg += f"🕒 Время (Ташкент): {now_str}"
+
+    if top_promo and BOT_TOKEN != "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11":
+        try:
+            img_io = await generate_item_card(
+                top_promo.competitor_name,
+                top_promo.item_name,
+                top_promo.base_price,
+                top_promo.promo_price,
+                top_promo.discount_percent,
+                platform,
+                top_promo.picture_url
+            )
+            photo = BufferedInputFile(img_io.read(), filename="stats.png")
+            keyboard = []
+            if top_promo.restaurant_url:
+                keyboard.append([InlineKeyboardButton(text=f"Открыть лучшую акцию 🛒", url=top_promo.restaurant_url)])
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard) if keyboard else None
+            
+            await bot.send_photo(
+                chat_id=ADMIN_CHAT_ID,
+                photo=photo,
+                caption=msg,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+            return
+        except Exception as e:
+            print(f"Failed to send parsing stats with photo: {e}")
 
     await send_telegram_alert(msg)
 
@@ -253,12 +357,14 @@ async def send_digest_with_buttons(promos: list):
     try:
         # Генерируем картинку для САМОЙ первой (лучшей) акции в списке
         top_promo = promos[0]
-        img_io = generate_promo_image(
+        img_io = await generate_item_card(
             top_promo["restaurant_name"],
             top_promo["promo_title"],
             top_promo["original_price"],
             top_promo["current_price"],
             top_promo["discount_percent"],
+            top_promo.get("aggregator_name", "Yandex"),
+            top_promo.get("picture_url")
         )
         photo = BufferedInputFile(img_io.read(), filename="top_digest.png")
 

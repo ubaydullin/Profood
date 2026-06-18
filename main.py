@@ -23,13 +23,31 @@ async def run_scraper_async():
     print("Initializing scrapers and database...")
     await init_db()
     try:
-        uzum_stats = await scrape_uzum()
+        from sqlalchemy.future import select
+        from sqlalchemy import desc
+        from database.db import AsyncSessionLocal
+        from database.models import ParsedPromo
+        from datetime import datetime, timedelta
         from notifications.bot import send_parsing_stats
 
-        await send_parsing_stats("UZUM", "completed", *uzum_stats)
+        async def get_top_promo(agg_name: str):
+            async with AsyncSessionLocal() as db:
+                recent = datetime.now() - timedelta(hours=1)
+                stmt = select(ParsedPromo).where(
+                    ParsedPromo.aggregator_name == agg_name,
+                    ParsedPromo.promo_price.isnot(None),
+                    ParsedPromo.timestamp >= recent
+                ).order_by(desc(ParsedPromo.discount_percent)).limit(1)
+                res = await db.execute(stmt)
+                return res.scalar()
+
+        uzum_stats = await scrape_uzum()
+        top_uzum = await get_top_promo("Uzum")
+        await send_parsing_stats("UZUM", "completed", *uzum_stats, top_promo=top_uzum)
 
         yandex_stats = await scrape_yandex()
-        await send_parsing_stats("YANDEX", "completed", *yandex_stats)
+        top_yandex = await get_top_promo("Yandex")
+        await send_parsing_stats("YANDEX", "completed", *yandex_stats, top_promo=top_yandex)
 
         print("All scraping tasks completed successfully.")
 
@@ -119,6 +137,8 @@ async def run_scraper_async():
                         "original_price": promo.base_price,
                         "current_price": promo.promo_price,
                         "first_seen_at": promo.timestamp,
+                        "aggregator_name": promo.aggregator_name,
+                        "picture_url": promo.picture_url
                     }
                 )
 

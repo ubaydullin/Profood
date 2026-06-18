@@ -273,6 +273,13 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
         if not promo_condition:
             promo_condition = f"Категория: {category_name}"
 
+    picture_uri = item.get("picture", {}).get("uri") or item.get("picture", {}).get("url")
+    picture_url = None
+    if picture_uri:
+        picture_url = str(picture_uri).replace("{w}", "800").replace("{h}", "600")
+        if picture_url.startswith("/"):
+            picture_url = "https://eda.yandex.uz" + picture_url
+
     return {
         "name": name,
         "price": current_price,
@@ -283,6 +290,7 @@ def _parse_yandex_item(item: dict, category_name: str) -> dict | None:
         "badge_texts": badge_texts,
         "category": category_name,
         "available": item.get("available", True),
+        "picture_url": picture_url,
     }
 
 
@@ -315,8 +323,9 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
                     promo = ParsedPromo(
                         timestamp=now,
                         aggregator_name="Yandex Eda",
-                        restaurant_url=data.get("restaurant_url"),
                         competitor_name=data["name"],
+                        restaurant_url=data.get("restaurant_url"),
+                        picture_url=item.get("picture_url"),
                         item_category=item.get("category", "Other"),
                         item_name=item["name"],
                         base_price=old_price,

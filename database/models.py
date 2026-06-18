@@ -21,6 +21,7 @@ class ParsedPromo(Base):
     aggregator_name: Mapped[str] = mapped_column(String, index=True)
     competitor_name: Mapped[str] = mapped_column(String, index=True)
     restaurant_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    picture_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # БЛОК 2: Товар и Ценообразование
     item_category: Mapped[str] = mapped_column(String, default="Uncategorized")

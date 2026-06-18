@@ -339,6 +339,15 @@ def _parse_uzum_item(item: dict) -> dict | None:
         if not promo_condition:
             promo_condition = "Акция"
 
+    picture_url = None
+    picture_obj = item.get("picture") or item.get("image") or item.get("photo")
+    if isinstance(picture_obj, dict):
+        picture_url = picture_obj.get("uri") or picture_obj.get("url")
+    elif isinstance(picture_obj, str):
+        picture_url = picture_obj
+    else:
+        picture_url = item.get("imageUrl")
+
     return {
         "name": name,
         "price": float(price),
@@ -346,6 +355,7 @@ def _parse_uzum_item(item: dict) -> dict | None:
         "has_promo": has_promo,
         "promo_type": promo_type,
         "promo_condition": promo_condition,
+        "picture_url": picture_url,
     }
 
 
@@ -377,6 +387,7 @@ async def process_uzum_results(results: list[dict]) -> tuple[int, int, int]:
                             aggregator_name="Uzum Tezkor",
                             restaurant_url=data.get("restaurant_url"),
                             competitor_name=data["name"],
+                            picture_url=item.get("picture_url"),
                             item_category=mapped_category,
                             item_name=item["name"],
                             base_price=old_price,
