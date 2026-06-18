@@ -24,6 +24,7 @@ jobs:
 
       - name: Run Scraper
         env:
-          # Берём секрет DATABASE_URL из настроек репозитория
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         run: uv run python main.py --scrape

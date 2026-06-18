@@ -126,6 +126,23 @@ async def async_scrape_yandex() -> list[dict]:
                         free_delivery_threshold = float(
                             cond.get("orderMinPrice", {}).get("value", 0)
                         )
+            # Время доставки (Yandex может отдавать в разных форматах)
+            delivery_time_min = None
+            delivery_time_max = None
+            eta = place.get("deliveryTime", place.get("estimatedDeliveryDuration"))
+            if isinstance(eta, dict):
+                delivery_time_min = eta.get("min")
+                delivery_time_max = eta.get("max")
+            elif isinstance(eta, (int, float)) and eta > 0:
+                delivery_time_min = int(eta)
+
+            # Минимальный заказ
+            min_order = 0.0
+            min_order_obj = place.get("minimumOrderAmount")
+            if isinstance(min_order_obj, dict):
+                min_order = float(min_order_obj.get("value", 0))
+            elif isinstance(min_order_obj, (int, float)):
+                min_order = float(min_order_obj)
             # ---------------------------------------------
 
             # Пропуск ритейла
@@ -153,8 +170,10 @@ async def async_scrape_yandex() -> list[dict]:
                         "rating": rating,
                         "reviews": reviews,
                         "delivery_fee": delivery_fee,
-                        "min_order": 0,
+                        "min_order": min_order,
                         "free_delivery_threshold": free_delivery_threshold,
+                        "delivery_time_min": delivery_time_min,
+                        "delivery_time_max": delivery_time_max,
                         "items": items,
                     }
                 )
@@ -342,10 +361,10 @@ async def process_yandex_results(results: list[dict]) -> tuple[int, int, int]:
                         discount_threshold=None,
                         is_aggregator_funded=False,
                         delivery_fee=data["delivery_fee"],
-                        service_fee=1000,
+                        service_fee=None,
                         min_order_value=data["min_order"],
-                        delivery_time_min=20,
-                        delivery_time_max=45,
+                        delivery_time_min=data.get("delivery_time_min"),
+                        delivery_time_max=data.get("delivery_time_max"),
                         position_in_list=data.get("position", 1),
                         is_in_carousel=False,
                         search_query_used="Feed",
