@@ -3,13 +3,33 @@ import asyncio
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
+import urllib.request
+import os
+
+FONT_PATH = "Roboto-Medium.ttf"
+
+def ensure_font_exists():
+    if not os.path.exists(FONT_PATH):
+        try:
+            url = "https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Medium.ttf"
+            urllib.request.urlretrieve(url, FONT_PATH)
+        except Exception as e:
+            print(f"Could not download font: {e}")
+
 async def fetch_image(url: str) -> Image.Image | None:
     if not url:
         return None
     if url.startswith("/"):
         url = "https://eda.yandex.uz" + url
+    
+    # Заменяем шаблоны размеров от Яндекс Еды, если они есть
+    url = url.replace("{w}", "800").replace("{h}", "600")
+        
     try:
-        async with aiohttp.ClientSession() as session:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+        }
+        async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(url, timeout=5) as response:
                 if response.status == 200:
                     data = await response.read()
@@ -69,12 +89,13 @@ def _render_card_sync(
     draw = ImageDraw.Draw(img)
 
     # Load fonts
+    ensure_font_exists()
     try:
-        font_xlarge = ImageFont.truetype("arial.ttf", 60)
-        font_large = ImageFont.truetype("arial.ttf", 50)
-        font_medium = ImageFont.truetype("arial.ttf", 35)
-        font_strike = ImageFont.truetype("arial.ttf", 30)
-        font_small = ImageFont.truetype("arial.ttf", 25)
+        font_xlarge = ImageFont.truetype(FONT_PATH, 60)
+        font_large = ImageFont.truetype(FONT_PATH, 50)
+        font_medium = ImageFont.truetype(FONT_PATH, 35)
+        font_strike = ImageFont.truetype(FONT_PATH, 30)
+        font_small = ImageFont.truetype(FONT_PATH, 25)
     except IOError:
         font_xlarge = font_large = font_medium = font_strike = font_small = ImageFont.load_default()
 
