@@ -214,40 +214,40 @@ def load_promo_data():
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300)
-def load_history_data():
+def get_all_competitors():
+    try:
+        conn = sqlite3.connect("salescrap.db")
+        query = "SELECT DISTINCT competitor_name FROM parsed_promos ORDER BY competitor_name"
+        df = pd.read_sql(query, conn)
+        conn.close()
+        return [name.strip().title() for name in df["competitor_name"] if name]
+    except Exception:
+        return []
+
+def get_items_for_competitor(competitor_name):
+    try:
+        conn = sqlite3.connect("salescrap.db")
+        # Ищем без учета регистра, так как мы сделали .title()
+        query = "SELECT DISTINCT item_name FROM parsed_promos WHERE competitor_name COLLATE NOCASE = ?"
+        df = pd.read_sql(query, conn, params=(competitor_name,))
+        conn.close()
+        return df["item_name"].tolist()
+    except Exception:
+        return []
+
+def get_item_history(competitor_name, item_name):
     try:
         conn = sqlite3.connect("salescrap.db")
         query = """
-            SELECT timestamp, aggregator_name, competitor_name, restaurant_url, item_name, item_category,
-                   base_price, promo_price, discount_percent, promo_type, promo_condition,
-                   free_delivery_threshold, picture_url
-            FROM parsed_promos
-            WHERE promo_price IS NOT NULL AND discount_percent > 0
+            SELECT timestamp, base_price, promo_price
+            FROM parsed_promos 
+            WHERE competitor_name COLLATE NOCASE = ? AND item_name = ?
+            ORDER BY timestamp ASC
         """
-        df = pd.read_sql(query, conn)
+        df = pd.read_sql(query, conn, params=(competitor_name, item_name))
         conn.close()
-
-        if df.empty:
-            return df
-
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df["competitor_name"] = df["competitor_name"].str.strip().str.title()
-
-        # Нормализация категорий
-        cat_map = {
-            "Pizza": "Пицца",
-            "Завтрак": "Завтраки",
-            "Яндекс комбо": "Комбо",
-            "Сеты": "Комбо"
-        }
-        df["item_category"] = df["item_category"].replace(cat_map)
-
-        # Вытаскиваем Сеты и Комбо из категории Other
-        mask_combo = df["item_name"].str.contains(r"комбо|сет|акци", case=False, na=False)
-        df.loc[mask_combo & (df["item_category"] == "Other"), "item_category"] = "Комбо"
-
-        df = df.sort_values("timestamp")
+        if not df.empty:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df
     except Exception:
         return pd.DataFrame()
@@ -546,35 +546,42 @@ with tab4:
         mime="text/csv",
     )
 
-    st.markdown("### 📈 Динамика конкретного товара")
-    history_df = load_history_data()
-    if not history_df.empty:
-        col_h1, col_h2 = st.columns(2)
-        with col_h1:
-            competitors = sorted(history_df["competitor_name"].unique())
+    st.markdown("### 📈 Динамика конкретного товара (Вся база)")
+    
+    col_h1, col_h2 = st.columns(2)
+    with col_h1:
+        competitors = sorted(list(set(get_all_competitors())))
+        if competitors:
             selected_comp = st.selectbox("Выберите заведение для истории", competitors)
+        else:
+            st.info("Нет данных о заведениях.")
+            selected_comp = None
 
-        with col_h2:
-            items = sorted(
-                history_df[history_df["competitor_name"] == selected_comp][
-                    "item_name"
-                ].unique()
-            )
-            selected_item = st.selectbox("Выберите товар", items)
+    with col_h2:
+        if selected_comp:
+            items = sorted(get_items_for_competitor(selected_comp))
+            if items:
+                selected_item = st.selectbox("Выберите товар", items)
+            else:
+                st.info("Нет данных о товарах.")
+                selected_item = None
+        else:
+            selected_item = None
 
-        item_history = history_df[
-            (history_df["competitor_name"] == selected_comp)
-            & (history_df["item_name"] == selected_item)
-        ]
+    if selected_comp and selected_item:
+        item_history = get_item_history(selected_comp, selected_item)
 
         if not item_history.empty:
+            # Заполняем promo_price базовой ценой, если акции не было, чтобы график не обрывался
+            item_history["promo_price"] = item_history["promo_price"].fillna(item_history["base_price"])
+
             fig_hist = go.Figure()
             fig_hist.add_trace(
                 go.Scatter(
                     x=item_history["timestamp"],
                     y=item_history["base_price"],
                     mode="lines+markers",
-                    name="Старая цена",
+                    name="Старая цена (База)",
                     line=dict(color="gray", dash="dash"),
                 )
             )
@@ -583,16 +590,17 @@ with tab4:
                     x=item_history["timestamp"],
                     y=item_history["promo_price"],
                     mode="lines+markers",
-                    name="Цена по акции",
+                    name="Цена по акции (Фактическая)",
                     line=dict(color="red", width=3),
                 )
             )
             fig_hist.update_layout(
-                xaxis_title="Время",
+                xaxis_title="Время парсинга",
                 yaxis_title="Цена (сум)",
                 legend=dict(
                     orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
                 ),
+                hovermode="x unified"
             )
             st.plotly_chart(fig_hist, width="stretch")
         else:
