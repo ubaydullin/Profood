@@ -26,6 +26,12 @@ async def fetch_image(url: str) -> Image.Image | None:
     
     # Заменяем шаблоны размеров от Яндекс Еды, если они есть
     url = url.replace("{w}", "800").replace("{h}", "600")
+    
+    # Проксируем запрос через wsrv.nl чтобы обойти блокировку IP от Яндекса в GitHub Actions
+    if "yandex" in url or "uzum" in url:
+        # Убираем https:// чтобы передать в wsrv.nl
+        clean_url = url.replace("https://", "").replace("http://", "")
+        url = f"https://wsrv.nl/?url={clean_url}"
         
     try:
         headers = {
