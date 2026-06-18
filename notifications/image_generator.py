@@ -20,7 +20,7 @@ async def fetch_image(url: str) -> Image.Image | None:
     if not url:
         return None
     if url.startswith("/"):
-        url = "https://eda.yandex.uz" + url
+        url = "https://eda.yandex.ru" + url
     
     # Заменяем шаблоны размеров от Яндекс Еды, если они есть
     url = url.replace("{w}", "800").replace("{h}", "600")
