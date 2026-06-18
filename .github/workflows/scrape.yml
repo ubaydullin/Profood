@@ -1,0 +1,29 @@
+name: Auto Scraper
+
+on:
+  schedule:
+    # Запуск каждые 6 часов: 00:00, 06:00, 12:00, 18:00 (по UTC)
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Ручной запуск из интерфейса GitHub
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install Playwright Browsers (если используется Yandex Scraper)
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run Scraper
+        env:
+          # Берём секрет DATABASE_URL из настроек репозитория
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python main.py --scrape
