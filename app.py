@@ -448,7 +448,7 @@ with tab2:
             xaxis_title="",
             margin=dict(l=0, r=0, t=30, b=0)
         )
-        st.plotly_chart(fig_box, use_container_width=True)
+        st.plotly_chart(fig_box, width="stretch")
 
     with col_b:
         st.markdown("**Матрица цен (Размер и цвет = скидка)**")
@@ -479,7 +479,7 @@ with tab2:
             paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=30, b=0)
         )
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width="stretch")
 
 with tab3:
     st.subheader("Война категорий: Скидка + Объем")
